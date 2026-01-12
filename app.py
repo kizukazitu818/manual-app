@@ -12,7 +12,7 @@ from PIL import Image as PILImage
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, Border, Side
 from openpyxl.drawing.image import Image as ExcelImage
-from gTTS import gTTS # 復活！
+from gtts import gTTS
 
 # --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
@@ -315,4 +315,5 @@ if uploaded_file is not None:
             file_name=f"{manual_number}_manual.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary"
+
         )
