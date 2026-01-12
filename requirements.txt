@@ -1,0 +1,7 @@
+streamlit
+google-generativeai
+opencv-python-headless
+openpyxl
+numpy
+Pillow
+gTTS  <-- これを追加！
