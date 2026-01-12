@@ -4,4 +4,4 @@ opencv-python-headless
 openpyxl
 numpy
 Pillow
-gTTS  <-- これを追加！
+gTTS
