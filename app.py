@@ -189,7 +189,7 @@ def process_video_with_gemini(video_path, api_key):
         if video_file.state.name == "FAILED": raise ValueError("動画処理失敗")
 
         status_text.info("🤖 マニュアルを作成中...（Gemini 2.5 Flash）")
-        model = genai.GenerativeModel(model_name="gemini-2.5-pro")
+        model = genai.GenerativeModel(model_name="gemini-2.5-flash")
         
         prompt = """
         あなたは製造現場の熟練管理者です。添付の動画を見て、新人作業員のための「標準作業手順書」を作成してください。
@@ -317,5 +317,6 @@ if uploaded_file is not None:
             type="primary"
 
         )
+
 
 
