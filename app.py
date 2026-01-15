@@ -25,12 +25,13 @@ st.set_page_config(
 # ★視認性を高めるカスタムCSS（文字を黒く、背景を優しく）
 st.markdown("""
     <style>
-    /* 全体の背景を薄いグレーに（目に優しい） */
+    /* 全体の背景を薄いグレーに */
     .stApp {
         background-color: #f4f6f9;
+        color: #333333;
     }
     
-    /* サイドバーの背景と文字色 */
+    /* サイドバーの背景 */
     [data-testid="stSidebar"] {
         background-color: #ffffff;
         border-right: 1px solid #e0e0e0;
@@ -45,21 +46,20 @@ st.markdown("""
         border: 1px solid #e0e0e0;
     }
     
-    /* ヘッダーの装飾 */
-    h1, h2, h3 {
-        color: #1f2937 !important; /* 濃いグレー */
-        font-family: 'Helvetica Neue', sans-serif;
+    /* 文字色の強制指定（白飛び防止） */
+    h1, h2, h3, h4, h5, h6, p, label, span, div {
+        color: #1f2937 !important; 
     }
     
-    /* テキスト全般を黒くする */
-    p, label, span, div {
-        color: #333333;
+    /* プレビュー内のテキストは黒く */
+    [data-testid="stMarkdownContainer"] p {
+        color: #333333 !important;
     }
-    
+
     /* ボタンのカスタマイズ */
     div.stButton > button:first-child {
         background-color: #2563eb;
-        color: white !important;
+        color: white !important; /* ボタンの文字だけは白 */
         font-weight: bold;
         border-radius: 6px;
         border: none;
@@ -104,7 +104,7 @@ with st.sidebar:
     author_name = st.text_input("作成者", value="管理者")
     create_date = st.date_input("作成日", datetime.date.today())
 
-# --- 3. データ処理用ヘルパー関数群（重要！） ---
+# --- 3. データ処理用ヘルパー関数群 ---
 def clean_timestamp(ts_value):
     """
     AIが '0:31' や 'approx 5s' などの形式で返してきた場合に
@@ -115,23 +115,18 @@ def clean_timestamp(ts_value):
     
     s = str(ts_value).strip()
     try:
-        # そのまま数値変換できる場合 ("30.5" -> 30.5)
         return float(s)
     except ValueError:
-        # "MM:SS" 形式の場合 ("0:31" -> 31.0)
         if ":" in s:
             parts = s.split(":")
             if len(parts) == 2:
                 try:
                     return float(parts[0]) * 60 + float(parts[1])
                 except: pass
-        
-        # 数字だけ無理やり抽出 ("約5秒" -> 5.0)
         numbers = re.findall(r"\d+\.?\d*", s)
         if numbers:
             return float(numbers[0])
-            
-    return 0.0 # どうしてもダメなら0秒にする
+    return 0.0
 
 def extract_frame_for_web(video_path, seconds):
     """Web表示用に高速にフレームを切り出す"""
@@ -212,8 +207,6 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
         
         cell_img = ws[f'B{current_row}']
         cell_img.border = thin_border
-        
-        # ★ここも修正！clean_timestampを使う
         ts = clean_timestamp(step.get('timestamp', 0))
         
         if video_path and ts >= 0:
@@ -284,7 +277,15 @@ uploaded_file = st.file_uploader("📂 作業動画をここにドラッグ＆�
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
-    with open(temp_filename, "wb") as f: f.write(uploaded_file.read())
+    
+    # 【★重要修正】メモリを節約するために、少しずつファイルを保存する方式に変更
+    # これにより "Connection Reset" (OOM) エラーを防ぎます
+    with open(temp_filename, "wb") as f:
+        while True:
+            chunk = uploaded_file.read(1024 * 1024) # 1MBずつ読み込む
+            if not chunk:
+                break
+            f.write(chunk)
 
     with st.expander("⚙️ プレビュー表示設定"):
         col_size1, col_size2 = st.columns(2)
@@ -299,7 +300,7 @@ if uploaded_file is not None:
         left, center, right = st.columns([0.1, 1, 0.1])
         
     with center:
-        st.video(uploaded_file)
+        st.video(temp_filename)
     
     st.divider()
     
@@ -331,10 +332,7 @@ if uploaded_file is not None:
                 col_img, col_text = st.columns([col_ratio_img, col_ratio_text])
                 
                 with col_img:
-                    # ★ここが重要！エラー修正ポイント
-                    # 以前の float(...) だけだとエラーになるので、clean_timestamp を通す
                     current_ts = clean_timestamp(step.get('timestamp', 0.0))
-                    
                     new_timestamp = st.number_input(
                         f"📷 画像位置(秒)", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}"
                     )
