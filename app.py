@@ -16,23 +16,27 @@ from gtts import gTTS
 
 # --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
-    page_title="Nano Banana AI | Auto-Manual Producer", # タイトルもそれっぽく変更
+    page_title="Nano Banana AI | Auto-Manual Producer",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ★UIカスタマイズ（テック＆モダンテーマ）★
+# ★UIカスタマイズ（淡いテックブルーテーマ）★
 st.markdown("""
     <style>
-    /* ファイルアップロード欄の背景色 */
+    /* ファイルアップロード欄のデザイン */
     [data-testid="stFileUploaderDropzone"] {
-        background-color: #F0F8FF; /* ごく薄いテックブルー */
-        border: 1px dashed #007BFF; /* 枠線をテックブルーに */
-        border-radius: 10px; /* 角を丸くしてモダンに */
+        background-color: #E6F3FF; /* 淡いテックブルー */
+        border: 1px dashed #007BFF; /* 枠線を濃いブルーに */
+        border-radius: 10px;
     }
-    /* サイドバーの背景色 */
+    /* ドラッグ&ドロップの文字色などを調整 */
+    [data-testid="stFileUploaderDropzone"] div {
+        color: #0056b3;
+    }
+    /* サイドバーの背景色（念のためCSSでも指定） */
     [data-testid="stSidebar"] {
-        background-color: #F4F6F9; /* メタリックグレー */
+        background-color: #E6F3FF; /* 淡いテックブルー */
     }
     /* ヘッダーの装飾（バナナ・イエローのアクセント） */
     h1 {
