@@ -22,74 +22,73 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ★プロ仕様のUIデザイン（CSS注入）
+# ★視認性改善CSS：どんな環境でも「白背景・黒文字」を強制する
 st.markdown("""
     <style>
-    /* 1. 全体の背景：目に優しい薄いブルーグレー */
-    .stApp {
-        background-color: #f1f5f9;
+    /* ベースの強制上書き */
+    html, body, [class*="css"] {
         font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
     }
-
-    /* 2. サイドバー：プロフェッショナルなダークネイビー */
-    [data-testid="stSidebar"] {
-        background-color: #1e293b;
+    
+    /* アプリ全体の背景と文字色 */
+    .stApp {
+        background-color: #f1f5f9 !important;
+        color: #1e293b !important;
     }
-    [data-testid="stSidebar"] * {
-        color: #e2e8f0 !important; /* 文字はオフホワイト */
+
+    /* サイドバー */
+    [data-testid="stSidebar"] {
+        background-color: #1e293b !important;
+    }
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] label, [data-testid="stSidebar"] span, [data-testid="stSidebar"] p {
+        color: #f8fafc !important; /* サイドバー内の文字は白 */
     }
     
-    /* 3. カードデザイン：コンテンツを白背景＋影で浮かせる */
+    /* 見出し（黒） */
+    h1, h2, h3, h4, h5, h6 {
+        color: #0f172a !important;
+        font-weight: 700 !important;
+    }
+    
+    /* 本文テキスト（黒） */
+    p, div, span, label, li {
+        color: #334155 !important;
+    }
+    
+    /* カードデザイン */
     .step-card {
-        background-color: white;
+        background-color: #ffffff !important;
         padding: 24px;
         border-radius: 12px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         margin-bottom: 20px;
-        border: 1px solid #e2e8f0;
-    }
-
-    /* 4. タイトル周り */
-    h1 {
-        color: #0f172a !important;
-        font-weight: 800;
-        letter-spacing: -0.05em;
-    }
-    h2, h3, h4 {
-        color: #334155 !important;
-        font-weight: 600;
-    }
-    
-    /* 5. 入力フォームの視認性向上 */
-    .stTextInput > div > div > input, .stTextArea > div > div > textarea {
-        background-color: #f8fafc;
-        color: #0f172a !important;
         border: 1px solid #cbd5e1;
     }
-    .stNumberInput > div > div > input {
-        color: #0f172a !important;
-    }
 
-    /* 6. ボタン：プライマリーボタンを強調 */
-    div.stButton > button:first-child {
-        background-color: #2563eb; /* 鮮やかなブルー */
-        color: white !important;
-        border-radius: 8px;
-        font-weight: 600;
-        padding: 0.6rem 1.2rem;
-        border: none;
-        box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
-        transition: all 0.2s;
-    }
-    div.stButton > button:first-child:hover {
-        background-color: #1d4ed8;
-        transform: translateY(-1px);
-        box-shadow: 0 6px 8px rgba(37, 99, 235, 0.3);
+    /* 入力フォームの文字色強制（重要！） */
+    .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox div[data-baseweb="select"] div {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border-color: #cbd5e1 !important;
     }
     
-    /* 7. テキスト色強制（黒） */
-    p, label, span, div[data-testid="stMarkdownContainer"] p {
-        color: #334155;
+    /* アップローダー等の文字色 */
+    [data-testid="stFileUploader"] label {
+        color: #0f172a !important;
+    }
+    [data-testid="stFileUploader"] section {
+        background-color: #ffffff !important;
+    }
+
+    /* ボタン */
+    div.stButton > button:first-child {
+        background-color: #2563eb !important;
+        color: #ffffff !important; /* ボタン文字は白 */
+        border: none;
+        box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
+    }
+    div.stButton > button:first-child:hover {
+        background-color: #1d4ed8 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -100,18 +99,16 @@ with col_h1:
     st.title("🏭 SOP Generator Enterprise")
     st.markdown("**映像解析AIによる、標準作業手順書（SOP）自動生成プラットフォーム**")
 with col_h2:
-    # ステータスバッジ風の表示
     st.markdown("""
-        <div style='background-color:white; padding:10px; border-radius:8px; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.05);'>
-            <small style='color:#64748b; font-weight:bold;'>SYSTEM STATUS</small><br>
-            <span style='color:#10b981; font-weight:bold;'>● ONLINE</span>
+        <div style='background-color:white; padding:10px; border-radius:8px; text-align:center; border:1px solid #ddd;'>
+            <small style='color:#64748b !important; font-weight:bold;'>SYSTEM STATUS</small><br>
+            <span style='color:#10b981 !important; font-weight:bold;'>● ONLINE</span>
         </div>
     """, unsafe_allow_html=True)
 
 # --- 2. サイドバー設定 ---
 with st.sidebar:
     st.markdown("### ⚙️ 設定パネル")
-    
     api_key = st.text_input("Google API Key", type="password")
     
     st.divider()
@@ -178,7 +175,6 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
     ws = wb.active
     ws.title = "作業手順書"
 
-    # デザイン定義
     header_font = Font(bold=True, size=16, name='Meiryo UI')
     title_font = Font(bold=True, size=12, name='Meiryo UI')
     normal_font = Font(size=11, name='Meiryo UI')
@@ -187,7 +183,6 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
     alignment_center = Alignment(horizontal='center', vertical='center')
     alignment_left = Alignment(horizontal='left', vertical='top', wrap_text=True)
 
-    # ヘッダー
     ws['A1'] = f"No: {m_num}"
     ws['C1'] = f"作成日: {m_date.strftime('%Y/%m/%d')}"
     ws['C1'].alignment = Alignment(horizontal='right')
@@ -198,12 +193,11 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
     ws['A3'].font = header_font
     ws['A3'].alignment = alignment_center
 
-    # テーブルヘッダー
     start_row = 5
     headers = ["No.", "作業画像", "作業内容・手順"]
     widths = [6, 45, 55]
     for i, (h, w) in enumerate(zip(headers, widths)):
-        col = chr(65 + i) # A, B, C
+        col = chr(65 + i)
         ws[f'{col}{start_row}'] = h
         ws.column_dimensions[col].width = w
         ws[f'{col}{start_row}'].font = title_font
@@ -214,13 +208,11 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
     for i, step in enumerate(steps, 1):
         ws.row_dimensions[current_row].height = 180
         
-        # No
         cell = ws[f'A{current_row}']
         cell.value = i
         cell.alignment = alignment_center
         cell.border = thin_border
         
-        # Image
         cell_img = ws[f'B{current_row}']
         cell_img.border = thin_border
         ts = clean_timestamp(step.get('timestamp', 0))
@@ -238,7 +230,6 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
                 else: cell_img.value = "[画像なし]"
             except: cell_img.value = "[エラー]"
         
-        # Text
         cell_text = ws[f'C{current_row}']
         cell_text.value = f"【{step['title']}】\n\n{step['text']}"
         cell_text.alignment = alignment_left
@@ -254,7 +245,7 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
 # --- 5. Gemini API処理 ---
 def process_video_with_gemini(video_path, api_key, model_name):
     genai.configure(api_key=api_key)
-    status_text = st.status("🚀 AIエージェントを起動中...", expanded=True) # プロっぽいステータスバー
+    status_text = st.status("🚀 AIエージェントを起動中...", expanded=True)
     try:
         status_text.write("📤 映像データをクラウドへ転送しています...")
         video_file = genai.upload_file(path=video_path)
@@ -286,25 +277,26 @@ def process_video_with_gemini(video_path, api_key, model_name):
 
 # --- 6. メインエリア ---
 
-# ファイルアップロードエリア（カード風）
+# ファイルアップロードエリア
 st.markdown("### 1. 映像データの入力")
 with st.container():
     st.markdown("""
         <div style='background-color:white; padding:20px; border-radius:10px; border: 2px dashed #cbd5e1; text-align:center;'>
-            <p style='margin:0; color:#64748b;'>↓ ここに作業動画ファイルをドロップしてください</p>
+            <p style='margin:0; color:#64748b !important;'>↓ ここに作業動画ファイルをドロップしてください</p>
         </div>
     """, unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("", type=["mp4", "mov"], label_visibility="collapsed")
+    # ★修正ポイント：ラベルを追加して警告を消去、label_visibilityで隠す
+    uploaded_file = st.file_uploader("動画アップロード", type=["mp4", "mov"], label_visibility="collapsed")
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
+    # メモリ節約読み込み
     with open(temp_filename, "wb") as f:
         while True:
             chunk = uploaded_file.read(1024 * 1024)
             if not chunk: break
             f.write(chunk)
 
-    # 2カラムレイアウト：左に動画、右にアクション
     col_v1, col_v2 = st.columns([2, 1])
     
     with col_v1:
@@ -325,28 +317,24 @@ if uploaded_file is not None:
                 st.session_state.manual_steps = steps
                 st.rerun()
 
-    # --- 編集エリア（カードデザイン適用） ---
+    # --- 編集エリア ---
     if st.session_state.manual_steps:
         st.divider()
         st.markdown("### 2. 手順の編集・構成")
         
         steps = st.session_state.manual_steps
         
-        # 編集フォーム開始
         with st.form("edit_form"):
             for i, step in enumerate(steps):
-                # HTMLを使って「カード」のような見た目を作る
                 st.markdown(f"""
                 <div class="step-card">
                     <h4 style="margin-top:0; color:#3b82f6 !important;">STEP {i+1}</h4>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # カードの中にカラムを作る
                 c1, c2 = st.columns([1, 2])
                 
                 with c1:
-                    # 画像プレビューとタイムスタンプ
                     current_ts = clean_timestamp(step.get('timestamp', 0.0))
                     new_ts = st.number_input(f"⏱ 秒数 (Step {i+1})", min_value=0.0, value=current_ts, step=0.1, key=f"ts_{i}")
                     
@@ -357,11 +345,9 @@ if uploaded_file is not None:
                     steps[i]['timestamp'] = new_ts
                     
                 with c2:
-                    # テキスト編集
                     steps[i]['title'] = st.text_input(f"見出し (Step {i+1})", value=step['title'], key=f"t_{i}")
                     steps[i]['text'] = st.text_area(f"説明文 (Step {i+1})", value=step['text'], height=150, key=f"d_{i}")
 
-            # フォームの送信ボタン
             st.markdown("<br>", unsafe_allow_html=True)
             submitted = st.form_submit_button("✅ 編集を確定してプレビューへ進む", use_container_width=True)
             
@@ -377,8 +363,8 @@ if uploaded_file is not None:
             <div style="background-color:white; padding:40px; border:1px solid #ddd; border-radius:4px;">
                 <h2 style="text-align:center; border-bottom:2px solid #333; padding-bottom:10px;">標準作業手順書</h2>
                 <div style="display:flex; justify-content:space-between; color:#666; margin-bottom:20px;">
-                    <span>No: {manual_number}</span>
-                    <span>作成: {author_name} ({create_date})</span>
+                    <span style='color:#333 !important;'>No: {manual_number}</span>
+                    <span style='color:#333 !important;'>作成: {author_name} ({create_date})</span>
                 </div>
             """, unsafe_allow_html=True)
             
@@ -393,7 +379,6 @@ if uploaded_file is not None:
                     st.markdown(f"**{step['title']}**")
                     st.markdown(step['text'])
                     
-                    # 音声
                     txt = f"手順{i}。{step['title']}。{step['text']}"
                     aud = generate_audio_bytes(txt)
                     if aud: st.audio(aud, format='audio/mp3')
@@ -402,7 +387,6 @@ if uploaded_file is not None:
                 
             st.markdown("</div>", unsafe_allow_html=True)
 
-        # ダウンロード
         excel_data = create_excel_file(steps, manual_number, author_name, create_date, temp_filename)
         st.download_button(
             label="📥 Excelファイルとしてダウンロード",
