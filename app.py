@@ -16,29 +16,31 @@ from gtts import gTTS
 
 # --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
-    page_title="Auto-Manual Producer",
+    page_title="Nano Banana AI | Auto-Manual Producer", # タイトルもそれっぽく変更
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ★ここが新機能！UIを強制的にカスタマイズするCSS★
-# アップロード欄の背景を「淡い朱色」にし、枠線を「濃い朱色」にします
+# ★UIカスタマイズ（テック＆モダンテーマ）★
 st.markdown("""
     <style>
     /* ファイルアップロード欄の背景色 */
     [data-testid="stFileUploaderDropzone"] {
-        background-color: #FFF0F0; /* 淡い朱色 */
-        border: 1px dashed #FF4B4B; /* 枠線を朱色に */
+        background-color: #F0F8FF; /* ごく薄いテックブルー */
+        border: 1px dashed #007BFF; /* 枠線をテックブルーに */
+        border-radius: 10px; /* 角を丸くしてモダンに */
     }
-    /* サイドバーの背景色（念のためCSSでも指定） */
+    /* サイドバーの背景色 */
     [data-testid="stSidebar"] {
-        background-color: #FFF0F0;
+        background-color: #F4F6F9; /* メタリックグレー */
+    }
+    /* ヘッダーの装飾（バナナ・イエローのアクセント） */
+    h1 {
+        border-bottom: 5px solid #FFD700; /* イエローのアンダーライン */
+        padding-bottom: 10px;
     }
     </style>
     """, unsafe_allow_html=True)
-
-st.title("🛠️ Auto-Manual Producer (AMP)")
-st.caption("動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。")
 
 # --- 2. モデルリスト取得関数 ---
 @st.cache_data(ttl=600)
@@ -59,6 +61,16 @@ def get_available_models(api_key):
 
 # --- 3. サイドバー設定 ---
 with st.sidebar:
+    # ロゴ表示
+    try:
+        st.image("logo.png", use_container_width=True)
+    except:
+        st.warning("logo.png をアップロードしてください")
+        st.header("🍌 Nano Banana")
+
+    st.markdown("### Manufacturing AI Tools")
+    st.divider()
+
     st.header("設定")
     api_key = st.text_input("Google API Key", type="password")
     
@@ -290,6 +302,9 @@ def process_video_with_gemini(video_path, api_key, selected_model):
         return []
 
 # --- 7. メインエリア ---
+st.title("🛠️ Auto-Manual Producer (AMP)")
+st.caption("動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。")
+
 uploaded_file = st.file_uploader("作業動画をアップロードしてください", type=["mp4", "mov"])
 
 if uploaded_file is not None:
