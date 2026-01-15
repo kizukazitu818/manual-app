@@ -14,7 +14,7 @@ from openpyxl.styles import Alignment, Font, Border, Side
 from openpyxl.drawing.image import Image as ExcelImage
 from gtts import gTTS
 
-# --- 1. アプリ全体の基本設定 & デザイン注入 ---
+# --- 1. アプリ全体の基本設定 & デザイン（視認性重視） ---
 st.set_page_config(
     page_title="Auto-Manual Producer Pro",
     page_icon="🛠️",
@@ -22,50 +22,51 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ★カスタムCSSでUIをリッチにする
+# ★視認性を高めるカスタムCSS（文字を黒く、背景を優しく）
 st.markdown("""
     <style>
-    /* 全体のフォントと背景 */
+    /* 全体の背景を薄いグレーに（目に優しい） */
     .stApp {
-        background-color: #f8f9fa;
+        background-color: #f4f6f9;
     }
-    /* サイドバーのスタイル */
+    
+    /* サイドバーの背景と文字色 */
     [data-testid="stSidebar"] {
-        background-color: #2c3e50;
+        background-color: #ffffff;
+        border-right: 1px solid #e0e0e0;
     }
-    [data-testid="stSidebar"] * {
-        color: #ecf0f1 !important;
-    }
-    /* カード風のコンテナスタイル */
-    .stForm, .element-container {
-        background-color: white;
+    
+    /* 入力フォームやカードのスタイル（白背景に黒文字） */
+    .stForm, div[data-testid="stExpander"] {
+        background-color: #ffffff;
         padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border: 1px solid #e0e0e0;
     }
+    
     /* ヘッダーの装飾 */
-    h1 {
-        color: #2c3e50;
+    h1, h2, h3 {
+        color: #1f2937 !important; /* 濃いグレー */
         font-family: 'Helvetica Neue', sans-serif;
-        border-bottom: 2px solid #3498db;
-        padding-bottom: 10px;
     }
-    h2, h3 {
-        color: #34495e;
+    
+    /* テキスト全般を黒くする */
+    p, label, span, div {
+        color: #333333;
     }
+    
     /* ボタンのカスタマイズ */
     div.stButton > button:first-child {
-        background-color: #3498db;
-        color: white;
-        border-radius: 5px;
-        border: none;
-        padding: 10px 24px;
+        background-color: #2563eb;
+        color: white !important;
         font-weight: bold;
-        transition: 0.3s;
+        border-radius: 6px;
+        border: none;
+        padding: 0.5rem 1rem;
     }
     div.stButton > button:first-child:hover {
-        background-color: #2980b9;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        background-color: #1d4ed8;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -73,7 +74,7 @@ st.markdown("""
 st.title("🛠️ Auto-Manual Producer Pro")
 st.markdown("##### 現場動画から、プロ品質の標準作業手順書（SOP）を瞬時に生成。")
 
-# --- 2. サイドバー設定（モデル選択機能を追加！） ---
+# --- 2. サイドバー設定 ---
 with st.sidebar:
     st.header("⚙️ システム設定")
     
@@ -82,19 +83,18 @@ with st.sidebar:
     
     st.divider()
     
-    # ★ここが新機能！モデル選択
+    # モデル選択
     st.subheader("🧠 AIモデル選択")
     model_options = [
-        "gemini-2.0-flash-exp", # 最新・高速
-        "gemini-1.5-pro",       # 高精度・安定
-        "gemini-1.5-flash",     # 高速・軽量
-        "gemini-1.0-pro"        # 旧安定版
+        "gemini-2.0-flash-exp", 
+        "gemini-1.5-pro",       
+        "gemini-1.5-flash",     
+        "gemini-1.0-pro"        
     ]
     selected_model = st.selectbox(
         "使用するモデル", 
         model_options,
-        index=0,
-        help="Proは精度が高く、Flashは処理が高速です。迷ったらFlash系がおすすめ。"
+        index=0
     )
 
     st.divider()
@@ -104,23 +104,34 @@ with st.sidebar:
     author_name = st.text_input("作成者", value="管理者")
     create_date = st.date_input("作成日", datetime.date.today())
 
-# --- 3. データ処理用ヘルパー関数群 ---
+# --- 3. データ処理用ヘルパー関数群（重要！） ---
 def clean_timestamp(ts_value):
-    """AIの出力ゆらぎを吸収して数値化する"""
+    """
+    AIが '0:31' や 'approx 5s' などの形式で返してきた場合に
+    強制的に秒数(float)に変換するフィルター関数
+    """
     if ts_value is None: return 0.0
     if isinstance(ts_value, (int, float)): return float(ts_value)
+    
     s = str(ts_value).strip()
     try:
+        # そのまま数値変換できる場合 ("30.5" -> 30.5)
         return float(s)
     except ValueError:
+        # "MM:SS" 形式の場合 ("0:31" -> 31.0)
         if ":" in s:
             parts = s.split(":")
             if len(parts) == 2:
-                try: return float(parts[0]) * 60 + float(parts[1])
+                try:
+                    return float(parts[0]) * 60 + float(parts[1])
                 except: pass
+        
+        # 数字だけ無理やり抽出 ("約5秒" -> 5.0)
         numbers = re.findall(r"\d+\.?\d*", s)
-        if numbers: return float(numbers[0])
-    return 0.0
+        if numbers:
+            return float(numbers[0])
+            
+    return 0.0 # どうしてもダメなら0秒にする
 
 def extract_frame_for_web(video_path, seconds):
     """Web表示用に高速にフレームを切り出す"""
@@ -201,6 +212,8 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
         
         cell_img = ws[f'B{current_row}']
         cell_img.border = thin_border
+        
+        # ★ここも修正！clean_timestampを使う
         ts = clean_timestamp(step.get('timestamp', 0))
         
         if video_path and ts >= 0:
@@ -237,17 +250,16 @@ def process_video_with_gemini(video_path, api_key, model_name):
     genai.configure(api_key=api_key)
     status_text = st.empty()
     try:
-        status_text.info(f"📤 動画をAIサーバーにアップロード中... (使用モデル: {model_name})")
+        status_text.info(f"📤 動画をAIサーバーにアップロード中... (モデル: {model_name})")
         video_file = genai.upload_file(path=video_path)
         while video_file.state.name == "PROCESSING":
-            status_text.info("⏳ AIが動画を処理しています...（数秒〜数十秒お待ちください）")
+            status_text.info("⏳ AIが動画を処理しています...")
             time.sleep(2)
             video_file = genai.get_file(video_file.name)
         if video_file.state.name == "FAILED": raise ValueError("動画処理失敗")
 
         status_text.info(f"🤖 マニュアルを生成中... ({model_name})")
         
-        # ★ここで選択されたモデルを使う！
         model = genai.GenerativeModel(model_name=model_name)
         
         prompt = """
@@ -268,14 +280,12 @@ def process_video_with_gemini(video_path, api_key, model_name):
         return []
 
 # --- 6. メインエリア ---
-# ファイルアップローダーをスタイリッシュに
 uploaded_file = st.file_uploader("📂 作業動画をここにドラッグ＆ドロップ", type=["mp4", "mov"], help="AIが解析する動画ファイルをアップロードしてください")
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
     with open(temp_filename, "wb") as f: f.write(uploaded_file.read())
 
-    # 設定パネル（エキスパンダー）
     with st.expander("⚙️ プレビュー表示設定"):
         col_size1, col_size2 = st.columns(2)
         with col_size1:
@@ -284,11 +294,9 @@ if uploaded_file is not None:
             img_width = st.slider("編集画像幅 (%)", 10, 100, 100)
 
     st.markdown("### 🎥 現場動画プレビュー")
-    
-    # 動画を中央寄せで表示するためのカラム調整
     left, center, right = st.columns([1, 2, 1])
     if video_width > 50:
-        left, center, right = st.columns([0.1, 1, 0.1]) # 大きく表示する場合
+        left, center, right = st.columns([0.1, 1, 0.1])
         
     with center:
         st.video(uploaded_file)
@@ -300,13 +308,11 @@ if uploaded_file is not None:
     if "manual_steps" not in st.session_state:
         st.session_state.manual_steps = None
 
-    # 解析ボタンを大きく目立たせる
     if st.button("🚀 AI解析を開始する", type="primary", use_container_width=True):
         if not api_key:
             st.error("⚠️ 左側の設定メニューでAPIキーを入力してください！")
         else:
             with st.spinner(f"AI ({selected_model}) が動画を解析中..."):
-                # モデル名を渡すように変更
                 steps = process_video_with_gemini(temp_filename, api_key, selected_model)
                 st.session_state.manual_steps = steps
                 st.rerun()
@@ -325,7 +331,10 @@ if uploaded_file is not None:
                 col_img, col_text = st.columns([col_ratio_img, col_ratio_text])
                 
                 with col_img:
+                    # ★ここが重要！エラー修正ポイント
+                    # 以前の float(...) だけだとエラーになるので、clean_timestamp を通す
                     current_ts = clean_timestamp(step.get('timestamp', 0.0))
+                    
                     new_timestamp = st.number_input(
                         f"📷 画像位置(秒)", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}"
                     )
@@ -335,8 +344,8 @@ if uploaded_file is not None:
                     steps[i]['timestamp'] = new_timestamp
 
                 with col_text:
-                    new_title = st.text_input(f"見出し", value=step['title'], key=f"title_{i}", placeholder="作業の見出しを入力")
-                    new_text = st.text_area(f"詳細手順", value=step['text'], key=f"text_{i}", height=120, placeholder="具体的な手順を入力")
+                    new_title = st.text_input(f"見出し", value=step['title'], key=f"title_{i}")
+                    new_text = st.text_area(f"詳細手順", value=step['text'], key=f"text_{i}", height=120)
                     steps[i]['title'] = new_title
                     steps[i]['text'] = new_text
                 st.divider()
@@ -348,7 +357,6 @@ if uploaded_file is not None:
         # --- プレビュー ---
         st.markdown("### 📑 完成プレビュー & 音声確認")
         with st.container(border=True): 
-            # プレビューヘッダー
             col_ph1, col_ph2 = st.columns([1,1])
             with col_ph1:
                 st.markdown(f"**No:** {manual_number}")
@@ -356,7 +364,7 @@ if uploaded_file is not None:
                 st.markdown(f"<div style='text-align: right'>作成日: {create_date}<br>作成者: {author_name}</div>", unsafe_allow_html=True)
             
             st.markdown("<h2 style='text-align: center; border-bottom: 2px solid #ddd;'>標準作業手順書</h2>", unsafe_allow_html=True)
-            st.write("") # スペース
+            st.write("") 
             
             for i, step in enumerate(steps, 1):
                 p_col1, p_col2, p_col3 = st.columns([0.3, 3, 4])
@@ -371,7 +379,6 @@ if uploaded_file is not None:
                     st.markdown(f"#### {step['title']}")
                     st.write(step['text'])
                     
-                    # 音声再生
                     read_text = f"手順{i}。{step['title']}。{step['text']}"
                     audio_bytes = generate_audio_bytes(read_text)
                     if audio_bytes:
