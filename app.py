@@ -7,7 +7,6 @@ import cv2
 import re
 import numpy as np
 import google.generativeai as genai
-import gc # メモリ開放用
 from io import BytesIO
 from PIL import Image as PILImage
 from openpyxl import Workbook
@@ -15,140 +14,82 @@ from openpyxl.styles import Alignment, Font, Border, Side
 from openpyxl.drawing.image import Image as ExcelImage
 from gtts import gTTS
 
-# --- 1. アプリ設定 & デザイン定義 ---
+# --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
-    page_title="SOP Generator Enterprise",
-    page_icon="🏭",
+    page_title="Auto-Manual Producer",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ★視認性改善CSS：どんな環境でも「白背景・黒文字」を強制する最強設定
-st.markdown("""
-    <style>
-    /* ベースの強制上書き */
-    html, body, [class*="css"] {
-        font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
-    }
-    
-    /* アプリ全体の背景と文字色（強制ライトモード） */
-    .stApp {
-        background-color: #f1f5f9 !important;
-        color: #1e293b !important;
-    }
+st.title("🛠️ Auto-Manual Producer (AMP)")
+st.caption("動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。")
 
-    /* サイドバー（ダークネイビー固定） */
-    [data-testid="stSidebar"] {
-        background-color: #1e293b !important;
-    }
-    [data-testid="stSidebar"] * {
-        color: #f8fafc !important; /* サイドバー内の文字は白 */
-    }
+# --- 2. モデルリスト取得関数（キャッシュ付き） ---
+@st.cache_data(ttl=600) # 10分間キャッシュ
+def get_available_models(api_key):
+    """APIキーを使って、実際に使用可能なモデル一覧を取得する"""
+    default_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
+    if not api_key:
+        return default_models
     
-    /* 見出し（黒） */
-    h1, h2, h3, h4, h5, h6 {
-        color: #0f172a !important;
-        font-weight: 700 !important;
-    }
-    
-    /* 本文テキスト（黒） */
-    p, div, span, label, li {
-        color: #334155 !important;
-    }
-    
-    /* カードデザイン（白背景・影付き） */
-    .step-card {
-        background-color: #ffffff !important;
-        padding: 24px;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        margin-bottom: 20px;
-        border: 1px solid #cbd5e1;
-    }
+    try:
+        genai.configure(api_key=api_key)
+        models = []
+        for m in genai.list_models():
+            # 'generateContent' に対応しているモデルだけを抽出
+            if 'generateContent' in m.supported_generation_methods:
+                # "models/" という接頭辞を消して見やすくする
+                name = m.name.replace("models/", "")
+                models.append(name)
+        
+        # 取得できた場合、Flash系を先頭に持ってくる（使いやすさのため）
+        models.sort()
+        # よく使うモデルをリストの先頭に移動させる優先順位ロジック
+        priority = ["gemini-1.5-flash", "gemini-2.0-flash-exp", "gemini-1.5-pro"]
+        for p in reversed(priority):
+            for m in models:
+                if p in m:
+                    models.remove(m)
+                    models.insert(0, m)
+        return models
+    except Exception:
+        return default_models
 
-    /* 入力フォームの文字色強制（ここが重要！） */
-    .stTextInput input, .stTextArea textarea, .stNumberInput input {
-        background-color: #ffffff !important;
-        color: #0f172a !important; /* 文字色は濃い黒 */
-        border-color: #cbd5e1 !important;
-    }
-    /* プレースホルダーの色 */
-    ::placeholder {
-        color: #94a3b8 !important;
-    }
-    
-    /* アップローダー等の文字色 */
-    [data-testid="stFileUploader"] label {
-        color: #0f172a !important;
-    }
-    [data-testid="stFileUploader"] section {
-        background-color: #ffffff !important;
-    }
-
-    /* ボタン（青背景・白文字） */
-    div.stButton > button:first-child {
-        background-color: #2563eb !important;
-        color: #ffffff !important;
-        border: none;
-        box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
-    }
-    div.stButton > button:first-child:hover {
-        background-color: #1d4ed8 !important;
-    }
-    div.stButton > button:first-child:active {
-        color: #ffffff !important;
-    }
-    
-    /* エキスパンダーの背景 */
-    .streamlit-expanderHeader {
-        background-color: #ffffff !important;
-        color: #334155 !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# ヘッダーエリア
-col_h1, col_h2 = st.columns([3, 1])
-with col_h1:
-    st.title("🏭 SOP Generator Enterprise")
-    st.markdown("**映像解析AIによる、標準作業手順書（SOP）自動生成プラットフォーム**")
-with col_h2:
-    st.markdown("""
-        <div style='background-color:white; padding:10px; border-radius:8px; text-align:center; border:1px solid #ddd; box-shadow:0 2px 4px rgba(0,0,0,0.05);'>
-            <small style='color:#64748b !important; font-weight:bold;'>SYSTEM STATUS</small><br>
-            <span style='color:#10b981 !important; font-weight:bold;'>● ONLINE</span>
-        </div>
-    """, unsafe_allow_html=True)
-
-# --- 2. サイドバー設定 ---
+# --- 3. サイドバー設定 ---
 with st.sidebar:
-    st.markdown("### ⚙️ 設定パネル")
+    st.header("設定")
     api_key = st.text_input("Google API Key", type="password")
     
     st.divider()
     
-    st.markdown("### 🧠 AIエンジンの選択")
-    model_options = [
-        "gemini-2.0-flash-exp", 
-        "gemini-1.5-pro",       
-        "gemini-1.5-flash",     
-        "gemini-1.0-pro"        
-    ]
-    selected_model = st.selectbox("Model", model_options, index=0)
+    st.header("🧠 AIモデル選択")
+    
+    # APIキーがある場合、自動でリストを取得する
+    if api_key:
+        available_models = get_available_models(api_key)
+        model_name = st.selectbox(
+            "使用するモデル",
+            available_models,
+            index=0,
+            help="Googleサーバーから取得した「現在使用可能なモデル」の一覧です。"
+        )
+    else:
+        st.info("APIキーを入力すると、モデル一覧が読み込まれます。")
+        model_name = "gemini-1.5-flash" # 仮のデフォルト
 
     st.divider()
-    
-    st.markdown("### 📄 ドキュメント情報")
-    manual_number = st.text_input("文書番号", value="SOP-2026-001")
+    st.header("📄 文書情報")
+    manual_number = st.text_input("マニュアル番号", value="SOP-001")
     author_name = st.text_input("作成者", value="管理者")
     create_date = st.date_input("作成日", datetime.date.today())
 
-# --- 3. データ処理用ヘルパー関数 ---
+# --- 4. データ処理用ヘルパー関数群 ---
 def clean_timestamp(ts_value):
     if ts_value is None: return 0.0
     if isinstance(ts_value, (int, float)): return float(ts_value)
     s = str(ts_value).strip()
-    try: return float(s)
+    try:
+        return float(s)
     except ValueError:
         if ":" in s:
             parts = s.split(":")
@@ -164,12 +105,14 @@ def extract_frame_for_web(video_path, seconds):
     cap.set(cv2.CAP_PROP_POS_MSEC, seconds * 1000)
     ret, frame = cap.read()
     cap.release()
-    if ret: return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    if ret:
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     return None
 
 def extract_frame_for_excel(video_path, seconds):
     frame_rgb = extract_frame_for_web(video_path, seconds)
-    if frame_rgb is not None: return PILImage.fromarray(frame_rgb)
+    if frame_rgb is not None:
+        return PILImage.fromarray(frame_rgb)
     return None
 
 @st.cache_data
@@ -181,55 +124,60 @@ def generate_audio_bytes(text):
         tts.write_to_fp(fp)
         fp.seek(0)
         return fp.read()
-    except Exception as e: return None
+    except Exception:
+        return None
 
-# --- 4. Excel作成関数 ---
+# --- 5. Excel作成関数 ---
 def create_excel_file(steps, m_num, m_author, m_date, video_path):
     wb = Workbook()
     ws = wb.active
     ws.title = "作業手順書"
 
-    header_font = Font(bold=True, size=16, name='Meiryo UI')
-    title_font = Font(bold=True, size=12, name='Meiryo UI')
-    normal_font = Font(size=11, name='Meiryo UI')
+    header_font = Font(bold=True, size=16)
+    meta_font = Font(size=11)
+    title_font = Font(bold=True, size=12)
+    normal_font = Font(size=11)
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
                          top=Side(style='thin'), bottom=Side(style='thin'))
-    alignment_center = Alignment(horizontal='center', vertical='center')
-    alignment_left = Alignment(horizontal='left', vertical='top', wrap_text=True)
 
     ws['A1'] = f"No: {m_num}"
+    ws['A1'].font = Font(bold=True, size=11)
     ws['C1'] = f"作成日: {m_date.strftime('%Y/%m/%d')}"
+    ws['C1'].font = meta_font
     ws['C1'].alignment = Alignment(horizontal='right')
     ws['C2'] = f"作成者: {m_author}"
+    ws['C2'].font = meta_font
     ws['C2'].alignment = Alignment(horizontal='right')
     ws.merge_cells('A3:C3')
     ws['A3'] = "標準作業手順書"
     ws['A3'].font = header_font
-    ws['A3'].alignment = alignment_center
+    ws['A3'].alignment = Alignment(horizontal='center', vertical='center')
 
     start_row = 5
-    headers = ["No.", "作業画像", "作業内容・手順"]
-    widths = [6, 45, 55]
-    for i, (h, w) in enumerate(zip(headers, widths)):
-        col = chr(65 + i)
-        ws[f'{col}{start_row}'] = h
-        ws.column_dimensions[col].width = w
-        ws[f'{col}{start_row}'].font = title_font
-        ws[f'{col}{start_row}'].border = thin_border
-        ws[f'{col}{start_row}'].alignment = alignment_center
+    ws[f'A{start_row}'] = "No."
+    ws[f'B{start_row}'] = "作業画像"
+    ws[f'C{start_row}'] = "作業内容・手順"
+    ws.column_dimensions['A'].width = 6
+    ws.column_dimensions['B'].width = 45
+    ws.column_dimensions['C'].width = 55
+    for col in ['A', 'B', 'C']:
+        cell = ws[f'{col}{start_row}']
+        cell.font = title_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = thin_border
 
     current_row = start_row + 1
     for i, step in enumerate(steps, 1):
         ws.row_dimensions[current_row].height = 180
-        
-        cell = ws[f'A{current_row}']
-        cell.value = i
-        cell.alignment = alignment_center
-        cell.border = thin_border
+        cell_no = ws[f'A{current_row}']
+        cell_no.value = i
+        cell_no.alignment = Alignment(horizontal='center', vertical='center')
+        cell_no.border = thin_border
         
         cell_img = ws[f'B{current_row}']
         cell_img.border = thin_border
         ts = clean_timestamp(step.get('timestamp', 0))
+        
         if video_path and ts >= 0:
             try:
                 pil_img = extract_frame_for_excel(video_path, ts)
@@ -241,174 +189,175 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
                     excel_img = ExcelImage(img_byte_arr)
                     excel_img.anchor = f'B{current_row}'
                     ws.add_image(excel_img)
-                else: cell_img.value = "[画像なし]"
-            except: cell_img.value = "[エラー]"
-        
+                else:
+                    cell_img.value = "[画像取得失敗]"
+            except Exception:
+                cell_img.value = "[画像エラー]"
+        else:
+            cell_img.value = "[画像なし]"
+
         cell_text = ws[f'C{current_row}']
         cell_text.value = f"【{step['title']}】\n\n{step['text']}"
-        cell_text.alignment = alignment_left
+        cell_text.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
         cell_text.border = thin_border
         cell_text.font = normal_font
-        
         current_row += 1
 
     output = BytesIO()
     wb.save(output)
     return output.getvalue()
 
-# --- 5. Gemini API処理 ---
-def process_video_with_gemini(video_path, api_key, model_name):
+# --- 6. Gemini API処理 ---
+def process_video_with_gemini(video_path, api_key, selected_model):
     genai.configure(api_key=api_key)
-    status_text = st.status("🚀 AIエージェントを起動中...", expanded=True)
+    
+    progress_bar = st.progress(0, text="準備中...")
+    
     try:
-        status_text.write("📤 映像データをクラウドへ転送しています...")
+        progress_bar.progress(10, text="📤 動画をAIサーバーにアップロード中...")
         video_file = genai.upload_file(path=video_path)
         
         while video_file.state.name == "PROCESSING":
-            status_text.write("⏳ 映像をフレーム単位で解析中...")
+            progress_bar.progress(30, text="⏳ AI側で動画を処理しています...（数秒〜数分）")
             time.sleep(2)
             video_file = genai.get_file(video_file.name)
             
-        if video_file.state.name == "FAILED": raise ValueError("動画処理失敗")
+        if video_file.state.name == "FAILED":
+            raise ValueError("動画の処理に失敗しました。")
 
-        status_text.write(f"🧠 {model_name} が作業手順を構造化しています...")
-        model = genai.GenerativeModel(model_name=model_name)
+        progress_bar.progress(60, text=f"🤖 マニュアルを生成中...（モデル: {selected_model}）")
+        
+        # 選択されたモデルを使用
+        model = genai.GenerativeModel(model_name=selected_model)
         
         prompt = """
         あなたは製造現場の熟練管理者です。添付の動画を見て、新人作業員のための「標準作業手順書」を作成してください。
         以下のJSON形式で出力してください:
-        [{"title": "見出し", "text": "詳細手順", "timestamp": 5.5}, ...]
-        注意: timestampは必ず秒数(数値)のみ。
+        [
+            {"title": "手順の見出し", "text": "具体的な作業内容。", "timestamp": 5.5},...
+        ]
+        注意点: 
+        - timestampは必ず「秒数（数値）」だけにしてください。（例: 5.5）
+        - 専門用語を正しく使い、曖昧な指示は具体化すること。
         """
-        response = model.generate_content([video_file, prompt], generation_config={"response_mime_type": "application/json"})
+        response = model.generate_content(
+            [video_file, prompt],
+            generation_config={"response_mime_type": "application/json"}
+        )
         
-        status_text.update(label="✅ 生成完了！", state="complete", expanded=False)
+        progress_bar.progress(100, text="完了！")
+        time.sleep(1)
+        progress_bar.empty()
+        
         return json.loads(response.text)
+
     except Exception as e:
-        status_text.update(label="❌ エラー発生", state="error")
-        st.error(f"Error: {e}")
+        st.error(f"エラー: {e}")
         return []
 
-# --- 6. メインエリア ---
-
-st.markdown("### 1. 映像データの入力")
-with st.container():
-    st.markdown("""
-        <div style='background-color:white; padding:20px; border-radius:10px; border: 2px dashed #cbd5e1; text-align:center;'>
-            <p style='margin:0; color:#64748b !important;'>↓ ここに作業動画ファイルをドロップしてください</p>
-        </div>
-    """, unsafe_allow_html=True)
-    # 警告対策：ラベルを追加し、visibilityで隠す
-    uploaded_file = st.file_uploader("動画アップロード", type=["mp4", "mov"], label_visibility="collapsed")
+# --- 7. メインエリア ---
+uploaded_file = st.file_uploader("作業動画をアップロードしてください", type=["mp4", "mov"])
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
-    
-    # ★【メモリクラッシュ対策】Chunk書き込み + メモリ開放
-    with open(temp_filename, "wb") as f:
-        # メモリを一気に食わないよう、少しずつ読み込んで書き込む
-        f.write(uploaded_file.getbuffer())
-    
-    # 書き込みが終わったら、ブラウザから受け取った巨大なデータを即座にメモリから消す！
-    del uploaded_file
-    gc.collect() # ガベージコレクション強制実行（お掃除）
+    with open(temp_filename, "wb") as f: f.write(uploaded_file.read())
 
-    col_v1, col_v2 = st.columns([2, 1])
-    
-    with col_v1:
-        st.video(temp_filename)
-        
-    with col_v2:
-        st.markdown("### アクション")
-        st.info("動画の内容をAIが解析し、手順書の下書きを作成します。")
-        
-        if "manual_steps" not in st.session_state:
-            st.session_state.manual_steps = None
+    with st.expander("⚙️ 表示サイズ調整"):
+        col_size1, col_size2 = st.columns(2)
+        with col_size1:
+            video_width = st.slider("動画プレイヤーのサイズ (%)", 10, 100, 50)
+        with col_size2:
+            img_width = st.slider("編集画像のサイズ (%)", 10, 100, 100)
 
-        if st.button("✨ 自動解析を実行する", type="primary", use_container_width=True):
-            if not api_key:
-                st.error("APIキーを入力してください")
-            else:
-                steps = process_video_with_gemini(temp_filename, api_key, selected_model)
+    st.subheader("🎥 現場動画（元データ）")
+    
+    left_padding = (100 - video_width) / 2
+    right_padding = (100 - video_width) / 2
+    cols = st.columns([max(0.1, left_padding), video_width, max(0.1, right_padding)])
+    with cols[1]:
+        st.video(uploaded_file)
+    
+    st.divider()
+    
+    st.subheader("📝 編集 & プレビュー")
+    
+    if "manual_steps" not in st.session_state:
+        st.session_state.manual_steps = None
+
+    if st.button("AI解析を実行する", type="primary"):
+        if not api_key:
+            st.error("⚠️ APIキーを入力してください！")
+        else:
+            with st.spinner(f"AIエージェントを起動中（モデル: {model_name}）..."):
+                steps = process_video_with_gemini(temp_filename, api_key, model_name)
                 st.session_state.manual_steps = steps
                 st.rerun()
-
+    
     # --- 編集エリア ---
     if st.session_state.manual_steps:
-        st.divider()
-        st.markdown("### 2. 手順の編集・構成")
-        
         steps = st.session_state.manual_steps
         
+        st.markdown(f"### ✍️ 手順の編集（使用モデル: {model_name}）")
         with st.form("edit_form"):
             for i, step in enumerate(steps):
-                st.markdown(f"""
-                <div class="step-card">
-                    <h4 style="margin-top:0; color:#3b82f6 !important;">STEP {i+1}</h4>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"#### 手順 {i+1}")
+                col_ratio_img = 1 + (img_width / 100)
+                col_ratio_text = 4 - (img_width / 100)
+                col_img, col_text = st.columns([col_ratio_img, col_ratio_text])
                 
-                c1, c2 = st.columns([1, 2])
-                
-                with c1:
+                with col_img:
                     current_ts = clean_timestamp(step.get('timestamp', 0.0))
-                    new_ts = st.number_input(f"⏱ 秒数 (Step {i+1})", min_value=0.0, value=current_ts, step=0.1, key=f"ts_{i}")
-                    
-                    frame = extract_frame_for_web(temp_filename, new_ts)
-                    if frame is not None:
-                        st.image(frame, use_container_width=True, caption=f"{new_ts}秒地点")
-                    
-                    steps[i]['timestamp'] = new_ts
-                    
-                with c2:
-                    steps[i]['title'] = st.text_input(f"見出し (Step {i+1})", value=step['title'], key=f"t_{i}")
-                    steps[i]['text'] = st.text_area(f"説明文 (Step {i+1})", value=step['text'], height=150, key=f"d_{i}")
+                    new_timestamp = st.number_input(
+                        f"画像位置(秒)", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}"
+                    )
+                    frame_rgb = extract_frame_for_web(temp_filename, new_timestamp)
+                    if frame_rgb is not None:
+                         # widthパラメータを使って警告を回避しつつサイズ調整
+                         st.image(frame_rgb, caption=f"{new_timestamp}秒時点", width=None, use_container_width=True)
+                    steps[i]['timestamp'] = new_timestamp
 
-            st.markdown("<br>", unsafe_allow_html=True)
-            submitted = st.form_submit_button("✅ 編集を確定してプレビューへ進む", use_container_width=True)
+                with col_text:
+                    new_title = st.text_input(f"見出し", value=step['title'], key=f"title_{i}")
+                    new_text = st.text_area(f"説明", value=step['text'], key=f"text_{i}", height=150)
+                    steps[i]['title'] = new_title
+                    steps[i]['text'] = new_text
+                st.divider()
             
+            submitted = st.form_submit_button("✅ 編集内容を確定してプレビューへ")
             if submitted:
-                st.success("内容を更新しました！")
+                st.success("内容を更新しました！下のプレビューを確認してください。")
 
-        # --- 最終プレビュー ---
-        st.divider()
-        st.markdown("### 3. 出力プレビュー")
-        
-        with st.container():
-            st.markdown(f"""
-            <div style="background-color:white; padding:40px; border:1px solid #ddd; border-radius:4px;">
-                <h2 style="text-align:center; border-bottom:2px solid #333; padding-bottom:10px;">標準作業手順書</h2>
-                <div style="display:flex; justify-content:space-between; color:#666; margin-bottom:20px;">
-                    <span style='color:#333 !important;'>No: {manual_number}</span>
-                    <span style='color:#333 !important;'>作成: {author_name} ({create_date})</span>
-                </div>
-            """, unsafe_allow_html=True)
+        # --- プレビュー ---
+        st.markdown("### 📄 完成イメージ（プレビュー & 音声確認）")
+        with st.container(border=True): 
+            st.markdown(f"**No:** {manual_number}　　**作成日:** {create_date}　　**作成者:** {author_name}")
+            st.markdown("## 標準作業手順書")
+            st.divider()
             
             for i, step in enumerate(steps, 1):
-                c_p1, c_p2, c_p3 = st.columns([0.2, 1, 2])
-                with c_p1: st.markdown(f"**{i}**")
-                with c_p2:
+                p_col1, p_col2, p_col3 = st.columns([0.5, 3, 4])
+                with p_col1: st.markdown(f"### {i}")
+                with p_col2:
                     ts = clean_timestamp(step.get('timestamp', 0))
-                    f = extract_frame_for_web(temp_filename, ts)
-                    if f is not None: st.image(f, use_container_width=True)
-                with c_p3:
-                    st.markdown(f"**{step['title']}**")
-                    st.markdown(step['text'])
+                    if temp_filename:
+                        frame_rgb = extract_frame_for_web(temp_filename, ts)
+                        if frame_rgb is not None:
+                            st.image(frame_rgb, use_container_width=True)
+                with p_col3:
+                    st.markdown(f"#### {step['title']}")
+                    st.write(step['text'])
                     
-                    txt = f"手順{i}。{step['title']}。{step['text']}"
-                    aud = generate_audio_bytes(txt)
-                    if aud: st.audio(aud, format='audio/mp3')
-                
+                    read_text = f"手順{i}。{step['title']}。{step['text']}"
+                    audio_bytes = generate_audio_bytes(read_text)
+                    if audio_bytes:
+                        st.audio(audio_bytes, format='audio/mp3')
                 st.divider()
-                
-            st.markdown("</div>", unsafe_allow_html=True)
 
         excel_data = create_excel_file(steps, manual_number, author_name, create_date, temp_filename)
         st.download_button(
-            label="📥 Excelファイルとしてダウンロード",
+            label="📥 最終版Excelをダウンロード",
             data=excel_data,
-            file_name=f"{manual_number}.xlsx",
+            file_name=f"{manual_number}_manual.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
-            use_container_width=True
+            type="primary"
         )
