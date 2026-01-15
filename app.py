@@ -16,8 +16,8 @@ from gtts import gTTS
 
 # --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
-    page_title="Nano Factory AI", # ブラウザのタブ名も変更
-    page_icon="📜",               # タブのアイコンも巻物に
+    page_title="Nano Factory AI",
+    page_icon="📜",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -36,8 +36,9 @@ st.markdown("""
     /* ファイルアップロード欄のデザイン */
     [data-testid="stFileUploaderDropzone"] {
         background-color: #E6F3FF; /* 淡いテックブルー */
-        border: 1px dashed #007BFF; /* 枠線を濃いブルーに */
-        border-radius: 15px; /* 角丸を強めて柔らかく */
+        border: 2px dashed #007BFF; /* 枠線を少し太く */
+        border-radius: 15px;
+        padding: 20px; /* 内側の余白を増やしてゆったりさせる */
     }
     [data-testid="stFileUploaderDropzone"] div {
         color: #0056b3;
@@ -48,7 +49,7 @@ st.markdown("""
         background-color: #E6F3FF;
     }
     
-    /* ヘッダーの装飾（イエローアクセント） */
+    /* ヘッダーの装飾 */
     h1 {
         border-bottom: 5px solid #FFD700;
         padding-bottom: 10px;
@@ -80,7 +81,7 @@ with st.sidebar:
         st.image("logo.png", use_container_width=True)
     except:
         st.warning("logo.png をアップロードしてください")
-        st.header(" Nano Factory ") # ロゴがない時の仮表示
+        st.header("🍌 Nano Banana")
 
     st.markdown("### Manufacturing AI Tools")
     st.divider()
@@ -316,11 +317,24 @@ def process_video_with_gemini(video_path, api_key, selected_model):
         return []
 
 # --- 7. メインエリア ---
-# タイトルを更新：巻物アイコン + Nano Factory AI
 st.title("📜 Nano Factory AI")
-st.caption("動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。")
 
-uploaded_file = st.file_uploader("作業動画をアップロードしてください", type=["mp4", "mov"])
+# ★文字を大きく・太く変更！★
+st.markdown("""
+    <p style='font-size: 1.3rem; font-weight: bold; color: #555; margin-bottom: 20px;'>
+    動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。
+    </p>
+""", unsafe_allow_html=True)
+
+# ★アップロード欄の文字も大きく・太く変更！★
+st.markdown("""
+    <div style='font-size: 1.3rem; font-weight: bold; margin-bottom: 10px; display: flex; align-items: center;'>
+    📂 作業動画をアップロードしてください
+    </div>
+""", unsafe_allow_html=True)
+
+# label_visibility="collapsed" で元の小さなラベルを隠す
+uploaded_file = st.file_uploader("", type=["mp4", "mov"], label_visibility="collapsed")
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
