@@ -3,8 +3,8 @@ maxUploadSize = 1024
 
 [theme]
 base = "light"
-primaryColor = "#FF4B4B"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
+primaryColor = "#FF4B4B"        # ボタンなどの濃い朱色
+backgroundColor = "#FFFFFF"     # メイン背景（白）
+secondaryBackgroundColor = "#FFF0F0" # ★ここ！サイドバーの背景（淡い朱色）
 textColor = "#31333F"
 font = "sans serif"
