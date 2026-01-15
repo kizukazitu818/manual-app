@@ -25,37 +25,24 @@ st.title("🛠️ Auto-Manual Producer (AMP)")
 st.caption("動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。")
 
 # --- 2. モデルリスト取得関数（キャッシュ付き） ---
-@st.cache_data(ttl=600) # 10分間キャッシュ
+@st.cache_data(ttl=600)
 def get_available_models(api_key):
     """APIキーを使って、実際に使用可能なモデル一覧を取得する"""
-    default_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
-    if not api_key:
-        return default_models
-    
+    default_models = ["gemini-1.5-flash"]
+    if not api_key: return default_models
     try:
         genai.configure(api_key=api_key)
         models = []
         for m in genai.list_models():
-            # 'generateContent' に対応しているモデルだけを抽出
             if 'generateContent' in m.supported_generation_methods:
-                # "models/" という接頭辞を消して見やすくする
                 name = m.name.replace("models/", "")
                 models.append(name)
-        
-        # 取得できた場合、Flash系を先頭に持ってくる（使いやすさのため）
         models.sort()
-        # よく使うモデルをリストの先頭に移動させる優先順位ロジック
-        priority = ["gemini-1.5-flash", "gemini-2.0-flash-exp", "gemini-1.5-pro"]
-        for p in reversed(priority):
-            for m in models:
-                if p in m:
-                    models.remove(m)
-                    models.insert(0, m)
-        return models
+        return models if models else default_models
     except Exception:
         return default_models
 
-# --- 3. サイドバー設定 ---
+# --- 3. サイドバー設定（ここを大改造！） ---
 with st.sidebar:
     st.header("設定")
     api_key = st.text_input("Google API Key", type="password")
@@ -64,18 +51,56 @@ with st.sidebar:
     
     st.header("🧠 AIモデル選択")
     
-    # APIキーがある場合、自動でリストを取得する
     if api_key:
+        # 1. まず利用可能な全モデルを取得
         available_models = get_available_models(api_key)
-        model_name = st.selectbox(
-            "使用するモデル",
-            available_models,
-            index=0,
-            help="Googleサーバーから取得した「現在使用可能なモデル」の一覧です。"
+        
+        # 2. 目的別の選択肢を定義
+        st.subheader("① 作成目的を選ぶ")
+        scenario = st.radio(
+            "どのような視点の手順書を作成しますか？",
+            [
+                "🔧 メカニック視点（点検・保全用）",
+                "🛡️ 安全管理者視点（教育・ルール用）",
+                "📹 解析・記録視点（動画リンク用）",
+                "🚀 標準（バランス型）"
+            ],
+            index=3, # デフォルトは標準
+            help="選んだ視点に合わせて、最適なAIモデルが自動的に推奨されます。"
         )
+
+        # 3. 選択されたシナリオに基づいて推奨モデルのキーワードを決める
+        recommended_keyword = ""
+        if "mechanic" in scenario or "メカニック" in scenario:
+            recommended_keyword = "gemini-2.5" # 2.5系を推奨
+            st.info("💡 Point: 部品の劣化や緩みなど、設備の状態を細かく描写します。")
+        elif "safety" in scenario or "安全管理" in scenario:
+            recommended_keyword = "gemini-3" # 3系を推奨
+            st.info("💡 Point: 指差し確認や安全タグなど、ルールや安全行動を重視します。")
+        elif "robotics" in scenario or "解析・記録" in scenario:
+            recommended_keyword = "robotics" # robotics系を推奨
+            st.info("💡 Point: 「(00:15-00:20)」のように正確なタイムスタンプを記録します。")
+        else:
+            recommended_keyword = "gemini-1.5-flash" # 標準は高速な1.5 Flash
+
+        # 4. 推奨キーワードを含むモデルをリストから探し、デフォルトのインデックスを計算
+        default_index = 0
+        for i, model_name in enumerate(available_models):
+            if recommended_keyword in model_name:
+                default_index = i
+                break # 最初に見つかったものを採用
+        
+        st.subheader("② 使用するモデルを確認")
+        final_model_name = st.selectbox(
+            "実際に使用するモデル（自動選択されます）",
+            available_models,
+            index=default_index,
+            help="上の目的に合わせて推奨モデルが選択されていますが、手動で変更も可能です。"
+        )
+
     else:
-        st.info("APIキーを入力すると、モデル一覧が読み込まれます。")
-        model_name = "gemini-1.5-flash" # 仮のデフォルト
+        st.info("APIキーを入力すると、モデル選択メニューが表示されます。")
+        final_model_name = "gemini-1.5-flash"
 
     st.divider()
     st.header("📄 文書情報")
@@ -227,7 +252,6 @@ def process_video_with_gemini(video_path, api_key, selected_model):
 
         progress_bar.progress(60, text=f"🤖 マニュアルを生成中...（モデル: {selected_model}）")
         
-        # 選択されたモデルを使用
         model = genai.GenerativeModel(model_name=selected_model)
         
         prompt = """
@@ -288,8 +312,9 @@ if uploaded_file is not None:
         if not api_key:
             st.error("⚠️ APIキーを入力してください！")
         else:
-            with st.spinner(f"AIエージェントを起動中（モデル: {model_name}）..."):
-                steps = process_video_with_gemini(temp_filename, api_key, model_name)
+            # ここで final_model_name を使う
+            with st.spinner(f"AIエージェントを起動中（モデル: {final_model_name}）..."):
+                steps = process_video_with_gemini(temp_filename, api_key, final_model_name)
                 st.session_state.manual_steps = steps
                 st.rerun()
     
@@ -297,7 +322,8 @@ if uploaded_file is not None:
     if st.session_state.manual_steps:
         steps = st.session_state.manual_steps
         
-        st.markdown(f"### ✍️ 手順の編集（使用モデル: {model_name}）")
+        # 使用したモデル名を表示
+        st.markdown(f"### ✍️ 手順の編集（使用モデル: {final_model_name}）")
         with st.form("edit_form"):
             for i, step in enumerate(steps):
                 st.markdown(f"#### 手順 {i+1}")
@@ -312,7 +338,6 @@ if uploaded_file is not None:
                     )
                     frame_rgb = extract_frame_for_web(temp_filename, new_timestamp)
                     if frame_rgb is not None:
-                         # widthパラメータを使って警告を回避しつつサイズ調整
                          st.image(frame_rgb, caption=f"{new_timestamp}秒時点", width=None, use_container_width=True)
                     steps[i]['timestamp'] = new_timestamp
 
