@@ -14,38 +14,95 @@ from openpyxl.styles import Alignment, Font, Border, Side
 from openpyxl.drawing.image import Image as ExcelImage
 from gtts import gTTS
 
-# --- 1. アプリ全体の基本設定 ---
+# --- 1. アプリ全体の基本設定 & デザイン注入 ---
 st.set_page_config(
-    page_title="Auto-Manual Producer",
+    page_title="Auto-Manual Producer Pro",
+    page_icon="🛠️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("🛠️ Auto-Manual Producer (AMP)")
-st.caption("動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。（Powered by Gemini 2.5 Flash）")
+# ★カスタムCSSでUIをリッチにする
+st.markdown("""
+    <style>
+    /* 全体のフォントと背景 */
+    .stApp {
+        background-color: #f8f9fa;
+    }
+    /* サイドバーのスタイル */
+    [data-testid="stSidebar"] {
+        background-color: #2c3e50;
+    }
+    [data-testid="stSidebar"] * {
+        color: #ecf0f1 !important;
+    }
+    /* カード風のコンテナスタイル */
+    .stForm, .element-container {
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    /* ヘッダーの装飾 */
+    h1 {
+        color: #2c3e50;
+        font-family: 'Helvetica Neue', sans-serif;
+        border-bottom: 2px solid #3498db;
+        padding-bottom: 10px;
+    }
+    h2, h3 {
+        color: #34495e;
+    }
+    /* ボタンのカスタマイズ */
+    div.stButton > button:first-child {
+        background-color: #3498db;
+        color: white;
+        border-radius: 5px;
+        border: none;
+        padding: 10px 24px;
+        font-weight: bold;
+        transition: 0.3s;
+    }
+    div.stButton > button:first-child:hover {
+        background-color: #2980b9;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# --- 2. サイドバー設定 ---
+st.title("🛠️ Auto-Manual Producer Pro")
+st.markdown("##### 現場動画から、プロ品質の標準作業手順書（SOP）を瞬時に生成。")
+
+# --- 2. サイドバー設定（モデル選択機能を追加！） ---
 with st.sidebar:
-    st.header("設定")
-    api_key = st.text_input("Google API Key", type="password")
+    st.header("⚙️ システム設定")
+    
+    # APIキー入力
+    api_key = st.text_input("Google API Key", type="password", help="Geminiを利用するためのキーを入力")
+    
     st.divider()
-    st.header("📄 文書情報")
-    manual_number = st.text_input("マニュアル番号", value="SOP-001")
+    
+    # ★ここが新機能！モデル選択
+    st.subheader("🧠 AIモデル選択")
+    model_options = [
+        "gemini-2.0-flash-exp", # 最新・高速
+        "gemini-1.5-pro",       # 高精度・安定
+        "gemini-1.5-flash",     # 高速・軽量
+        "gemini-1.0-pro"        # 旧安定版
+    ]
+    selected_model = st.selectbox(
+        "使用するモデル", 
+        model_options,
+        index=0,
+        help="Proは精度が高く、Flashは処理が高速です。迷ったらFlash系がおすすめ。"
+    )
+
+    st.divider()
+    
+    st.header("📄 文書プロパティ")
+    manual_number = st.text_input("文書番号 (No)", value="SOP-001")
     author_name = st.text_input("作成者", value="管理者")
     create_date = st.date_input("作成日", datetime.date.today())
-    st.divider()
-    if st.button("使用可能なモデル一覧を確認"):
-        if not api_key:
-            st.error("先にAPIキーを入力してください")
-        else:
-            try:
-                genai.configure(api_key=api_key)
-                st.write("▼ 使用可能なモデル:")
-                for m in genai.list_models():
-                    if 'generateContent' in m.supported_generation_methods:
-                        st.code(m.name)
-            except Exception as e:
-                st.error(f"エラー: {e}")
 
 # --- 3. データ処理用ヘルパー関数群 ---
 def clean_timestamp(ts_value):
@@ -82,7 +139,7 @@ def extract_frame_for_excel(video_path, seconds):
         return PILImage.fromarray(frame_rgb)
     return None
 
-@st.cache_data # 音声データをキャッシュして高速化
+@st.cache_data
 def generate_audio_bytes(text):
     """テキストから音声を生成してバイナリデータで返す"""
     try:
@@ -176,20 +233,22 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
     return output.getvalue()
 
 # --- 5. Gemini API処理 ---
-def process_video_with_gemini(video_path, api_key):
+def process_video_with_gemini(video_path, api_key, model_name):
     genai.configure(api_key=api_key)
     status_text = st.empty()
     try:
-        status_text.info("📤 動画をAIサーバーにアップロード中...")
+        status_text.info(f"📤 動画をAIサーバーにアップロード中... (使用モデル: {model_name})")
         video_file = genai.upload_file(path=video_path)
         while video_file.state.name == "PROCESSING":
-            status_text.info("⏳ AIが動画を処理しています...")
-            time.sleep(1)
+            status_text.info("⏳ AIが動画を処理しています...（数秒〜数十秒お待ちください）")
+            time.sleep(2)
             video_file = genai.get_file(video_file.name)
         if video_file.state.name == "FAILED": raise ValueError("動画処理失敗")
 
-        status_text.info("🤖 マニュアルを作成中...（Gemini 2.5 Flash）")
-        model = genai.GenerativeModel(model_name="models/gemini-2.5-flash")
+        status_text.info(f"🤖 マニュアルを生成中... ({model_name})")
+        
+        # ★ここで選択されたモデルを使う！
+        model = genai.GenerativeModel(model_name=model_name)
         
         prompt = """
         あなたは製造現場の熟練管理者です。添付の動画を見て、新人作業員のための「標準作業手順書」を作成してください。
@@ -209,40 +268,46 @@ def process_video_with_gemini(video_path, api_key):
         return []
 
 # --- 6. メインエリア ---
-uploaded_file = st.file_uploader("作業動画をアップロードしてください", type=["mp4", "mov"])
+# ファイルアップローダーをスタイリッシュに
+uploaded_file = st.file_uploader("📂 作業動画をここにドラッグ＆ドロップ", type=["mp4", "mov"], help="AIが解析する動画ファイルをアップロードしてください")
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
     with open(temp_filename, "wb") as f: f.write(uploaded_file.read())
 
-    with st.expander("⚙️ 表示サイズ調整"):
+    # 設定パネル（エキスパンダー）
+    with st.expander("⚙️ プレビュー表示設定"):
         col_size1, col_size2 = st.columns(2)
         with col_size1:
-            video_width = st.slider("動画プレイヤーのサイズ (%)", 10, 100, 50)
+            video_width = st.slider("動画プレイヤー幅 (%)", 10, 100, 60)
         with col_size2:
-            img_width = st.slider("編集画像のサイズ (%)", 10, 100, 100)
+            img_width = st.slider("編集画像幅 (%)", 10, 100, 100)
 
-    st.subheader("🎥 現場動画（元データ）")
+    st.markdown("### 🎥 現場動画プレビュー")
     
-    left_padding = (100 - video_width) / 2
-    right_padding = (100 - video_width) / 2
-    cols = st.columns([max(0.1, left_padding), video_width, max(0.1, right_padding)])
-    with cols[1]:
+    # 動画を中央寄せで表示するためのカラム調整
+    left, center, right = st.columns([1, 2, 1])
+    if video_width > 50:
+        left, center, right = st.columns([0.1, 1, 0.1]) # 大きく表示する場合
+        
+    with center:
         st.video(uploaded_file)
     
     st.divider()
     
-    st.subheader("📝 編集 & プレビュー")
+    st.markdown("### 📝 手順作成・編集")
     
     if "manual_steps" not in st.session_state:
         st.session_state.manual_steps = None
 
-    if st.button("AI解析を実行する", type="primary"):
+    # 解析ボタンを大きく目立たせる
+    if st.button("🚀 AI解析を開始する", type="primary", use_container_width=True):
         if not api_key:
-            st.error("⚠️ APIキーを入力してください！")
+            st.error("⚠️ 左側の設定メニューでAPIキーを入力してください！")
         else:
-            with st.spinner("AIが動画を解析し、ドラフトを作成しています..."):
-                steps = process_video_with_gemini(temp_filename, api_key)
+            with st.spinner(f"AI ({selected_model}) が動画を解析中..."):
+                # モデル名を渡すように変更
+                steps = process_video_with_gemini(temp_filename, api_key, selected_model)
                 st.session_state.manual_steps = steps
                 st.rerun()
     
@@ -250,10 +315,11 @@ if uploaded_file is not None:
     if st.session_state.manual_steps:
         steps = st.session_state.manual_steps
         
-        st.markdown("### ✍️ 手順の編集")
+        st.info("💡 以下のフォームで内容を微調整できます。画像位置（秒数）を変えると、リアルタイムに画像が切り替わります。")
+
         with st.form("edit_form"):
             for i, step in enumerate(steps):
-                st.markdown(f"#### 手順 {i+1}")
+                st.markdown(f"#### Step {i+1}")
                 col_ratio_img = 1 + (img_width / 100)
                 col_ratio_text = 4 - (img_width / 100)
                 col_img, col_text = st.columns([col_ratio_img, col_ratio_text])
@@ -261,7 +327,7 @@ if uploaded_file is not None:
                 with col_img:
                     current_ts = clean_timestamp(step.get('timestamp', 0.0))
                     new_timestamp = st.number_input(
-                        f"画像位置(秒)", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}"
+                        f"📷 画像位置(秒)", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}"
                     )
                     frame_rgb = extract_frame_for_web(temp_filename, new_timestamp)
                     if frame_rgb is not None:
@@ -269,56 +335,56 @@ if uploaded_file is not None:
                     steps[i]['timestamp'] = new_timestamp
 
                 with col_text:
-                    new_title = st.text_input(f"見出し", value=step['title'], key=f"title_{i}")
-                    new_text = st.text_area(f"説明", value=step['text'], key=f"text_{i}", height=150)
+                    new_title = st.text_input(f"見出し", value=step['title'], key=f"title_{i}", placeholder="作業の見出しを入力")
+                    new_text = st.text_area(f"詳細手順", value=step['text'], key=f"text_{i}", height=120, placeholder="具体的な手順を入力")
                     steps[i]['title'] = new_title
                     steps[i]['text'] = new_text
                 st.divider()
             
-            submitted = st.form_submit_button("✅ 編集内容を確定してプレビューへ")
+            submitted = st.form_submit_button("✅ 編集を確定してプレビュー", use_container_width=True)
             if submitted:
-                st.success("内容を更新しました！下のプレビューを確認してください。")
+                st.success("編集内容を更新しました！下にスクロールして完成形を確認してください。")
 
-        # --- プレビュー（音声付き！） ---
-        st.markdown("### 📄 完成イメージ（プレビュー & 音声確認）")
+        # --- プレビュー ---
+        st.markdown("### 📑 完成プレビュー & 音声確認")
         with st.container(border=True): 
-            st.markdown(f"**No:** {manual_number}　　**作成日:** {create_date}　　**作成者:** {author_name}")
-            st.markdown("## 標準作業手順書")
-            st.divider()
+            # プレビューヘッダー
+            col_ph1, col_ph2 = st.columns([1,1])
+            with col_ph1:
+                st.markdown(f"**No:** {manual_number}")
+            with col_ph2:
+                st.markdown(f"<div style='text-align: right'>作成日: {create_date}<br>作成者: {author_name}</div>", unsafe_allow_html=True)
+            
+            st.markdown("<h2 style='text-align: center; border-bottom: 2px solid #ddd;'>標準作業手順書</h2>", unsafe_allow_html=True)
+            st.write("") # スペース
             
             for i, step in enumerate(steps, 1):
-                p_col1, p_col2, p_col3 = st.columns([0.5, 3, 4])
-                with p_col1: st.markdown(f"### {i}")
+                p_col1, p_col2, p_col3 = st.columns([0.3, 3, 4])
+                with p_col1: st.markdown(f"<h3 style='color: #888;'>{i}</h3>", unsafe_allow_html=True)
                 with p_col2:
                     ts = clean_timestamp(step.get('timestamp', 0))
                     if temp_filename:
                         frame_rgb = extract_frame_for_web(temp_filename, ts)
                         if frame_rgb is not None:
-                            st.image(frame_rgb, use_container_width=True)
+                            st.image(frame_rgb, use_container_width=True, output_format="JPEG")
                 with p_col3:
                     st.markdown(f"#### {step['title']}")
                     st.write(step['text'])
                     
-                    # ★ここで音声を生成して表示★
-                    # 読み上げ用テキスト（見出し＋本文）
+                    # 音声再生
                     read_text = f"手順{i}。{step['title']}。{step['text']}"
                     audio_bytes = generate_audio_bytes(read_text)
                     if audio_bytes:
                         st.audio(audio_bytes, format='audio/mp3')
 
-                st.divider()
+                st.markdown("---")
 
         excel_data = create_excel_file(steps, manual_number, author_name, create_date, temp_filename)
         st.download_button(
-            label="📥 最終版Excelをダウンロード",
+            label="📥 Excelファイルを出力する",
             data=excel_data,
             file_name=f"{manual_number}_manual.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary"
-
+            type="primary",
+            use_container_width=True
         )
-
-
-
-
-
