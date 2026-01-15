@@ -333,8 +333,8 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# label_visibility="collapsed" で元の小さなラベルを隠す
-uploaded_file = st.file_uploader("", type=["mp4", "mov"], label_visibility="collapsed")
+# label_visibilityを削除してエラーを回避
+uploaded_file = st.file_uploader("", type=["mp4", "mov"])
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
