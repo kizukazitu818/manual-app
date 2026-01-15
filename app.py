@@ -16,31 +16,41 @@ from gtts import gTTS
 
 # --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
-    page_title="Nano Banana AI | Auto-Manual Producer",
+    page_title="Nano Factory AI", # ブラウザのタブ名も変更
+    page_icon="📜",               # タブのアイコンも巻物に
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ★UIカスタマイズ（淡いテックブルーテーマ）★
+# ★UIカスタマイズ（丸文字フォント ＆ テックブルーテーマ）★
 st.markdown("""
     <style>
+    /* Google Fonts（丸文字）を読み込み */
+    @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@300;400;700&display=swap');
+
+    /* アプリ全体のフォントを丸文字に変更 */
+    html, body, [class*="css"] {
+        font-family: 'M PLUS Rounded 1c', sans-serif !important;
+    }
+
     /* ファイルアップロード欄のデザイン */
     [data-testid="stFileUploaderDropzone"] {
         background-color: #E6F3FF; /* 淡いテックブルー */
         border: 1px dashed #007BFF; /* 枠線を濃いブルーに */
-        border-radius: 10px;
+        border-radius: 15px; /* 角丸を強めて柔らかく */
     }
-    /* ドラッグ&ドロップの文字色などを調整 */
     [data-testid="stFileUploaderDropzone"] div {
         color: #0056b3;
     }
-    /* サイドバーの背景色（念のためCSSでも指定） */
+    
+    /* サイドバーの背景色 */
     [data-testid="stSidebar"] {
-        background-color: #E6F3FF; /* 淡いテックブルー */
+        background-color: #E6F3FF;
     }
-    /* ヘッダーの装飾（バナナ・イエローのアクセント） */
+    
+    /* ヘッダーの装飾（イエローアクセント） */
     h1 {
-        border-bottom: 5px solid #FFD700; /* イエローのアンダーライン */
+        border-bottom: 5px solid #FFD700;
         padding-bottom: 10px;
     }
     </style>
@@ -70,7 +80,7 @@ with st.sidebar:
         st.image("logo.png", use_container_width=True)
     except:
         st.warning("logo.png をアップロードしてください")
-        st.header("🍌 Nano Banana")
+        st.header(" Nano Factory ") # ロゴがない時の仮表示
 
     st.markdown("### Manufacturing AI Tools")
     st.divider()
@@ -306,7 +316,8 @@ def process_video_with_gemini(video_path, api_key, selected_model):
         return []
 
 # --- 7. メインエリア ---
-st.title("🛠️ Auto-Manual Producer (AMP)")
+# タイトルを更新：巻物アイコン + Nano Factory AI
+st.title("📜 Nano Factory AI")
 st.caption("動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。")
 
 uploaded_file = st.file_uploader("作業動画をアップロードしてください", type=["mp4", "mov"])
