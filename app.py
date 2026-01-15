@@ -7,6 +7,7 @@ import cv2
 import re
 import numpy as np
 import google.generativeai as genai
+import gc # メモリ開放用
 from io import BytesIO
 from PIL import Image as PILImage
 from openpyxl import Workbook
@@ -22,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ★視認性改善CSS：どんな環境でも「白背景・黒文字」を強制する
+# ★視認性改善CSS：どんな環境でも「白背景・黒文字」を強制する最強設定
 st.markdown("""
     <style>
     /* ベースの強制上書き */
@@ -30,17 +31,17 @@ st.markdown("""
         font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
     }
     
-    /* アプリ全体の背景と文字色 */
+    /* アプリ全体の背景と文字色（強制ライトモード） */
     .stApp {
         background-color: #f1f5f9 !important;
         color: #1e293b !important;
     }
 
-    /* サイドバー */
+    /* サイドバー（ダークネイビー固定） */
     [data-testid="stSidebar"] {
         background-color: #1e293b !important;
     }
-    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] label, [data-testid="stSidebar"] span, [data-testid="stSidebar"] p {
+    [data-testid="stSidebar"] * {
         color: #f8fafc !important; /* サイドバー内の文字は白 */
     }
     
@@ -55,7 +56,7 @@ st.markdown("""
         color: #334155 !important;
     }
     
-    /* カードデザイン */
+    /* カードデザイン（白背景・影付き） */
     .step-card {
         background-color: #ffffff !important;
         padding: 24px;
@@ -65,11 +66,15 @@ st.markdown("""
         border: 1px solid #cbd5e1;
     }
 
-    /* 入力フォームの文字色強制（重要！） */
-    .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox div[data-baseweb="select"] div {
+    /* 入力フォームの文字色強制（ここが重要！） */
+    .stTextInput input, .stTextArea textarea, .stNumberInput input {
         background-color: #ffffff !important;
-        color: #0f172a !important;
+        color: #0f172a !important; /* 文字色は濃い黒 */
         border-color: #cbd5e1 !important;
+    }
+    /* プレースホルダーの色 */
+    ::placeholder {
+        color: #94a3b8 !important;
     }
     
     /* アップローダー等の文字色 */
@@ -80,15 +85,24 @@ st.markdown("""
         background-color: #ffffff !important;
     }
 
-    /* ボタン */
+    /* ボタン（青背景・白文字） */
     div.stButton > button:first-child {
         background-color: #2563eb !important;
-        color: #ffffff !important; /* ボタン文字は白 */
+        color: #ffffff !important;
         border: none;
         box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
     }
     div.stButton > button:first-child:hover {
         background-color: #1d4ed8 !important;
+    }
+    div.stButton > button:first-child:active {
+        color: #ffffff !important;
+    }
+    
+    /* エキスパンダーの背景 */
+    .streamlit-expanderHeader {
+        background-color: #ffffff !important;
+        color: #334155 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -100,7 +114,7 @@ with col_h1:
     st.markdown("**映像解析AIによる、標準作業手順書（SOP）自動生成プラットフォーム**")
 with col_h2:
     st.markdown("""
-        <div style='background-color:white; padding:10px; border-radius:8px; text-align:center; border:1px solid #ddd;'>
+        <div style='background-color:white; padding:10px; border-radius:8px; text-align:center; border:1px solid #ddd; box-shadow:0 2px 4px rgba(0,0,0,0.05);'>
             <small style='color:#64748b !important; font-weight:bold;'>SYSTEM STATUS</small><br>
             <span style='color:#10b981 !important; font-weight:bold;'>● ONLINE</span>
         </div>
@@ -277,7 +291,6 @@ def process_video_with_gemini(video_path, api_key, model_name):
 
 # --- 6. メインエリア ---
 
-# ファイルアップロードエリア
 st.markdown("### 1. 映像データの入力")
 with st.container():
     st.markdown("""
@@ -285,17 +298,20 @@ with st.container():
             <p style='margin:0; color:#64748b !important;'>↓ ここに作業動画ファイルをドロップしてください</p>
         </div>
     """, unsafe_allow_html=True)
-    # ★修正ポイント：ラベルを追加して警告を消去、label_visibilityで隠す
+    # 警告対策：ラベルを追加し、visibilityで隠す
     uploaded_file = st.file_uploader("動画アップロード", type=["mp4", "mov"], label_visibility="collapsed")
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
-    # メモリ節約読み込み
+    
+    # ★【メモリクラッシュ対策】Chunk書き込み + メモリ開放
     with open(temp_filename, "wb") as f:
-        while True:
-            chunk = uploaded_file.read(1024 * 1024)
-            if not chunk: break
-            f.write(chunk)
+        # メモリを一気に食わないよう、少しずつ読み込んで書き込む
+        f.write(uploaded_file.getbuffer())
+    
+    # 書き込みが終わったら、ブラウザから受け取った巨大なデータを即座にメモリから消す！
+    del uploaded_file
+    gc.collect() # ガベージコレクション強制実行（お掃除）
 
     col_v1, col_v2 = st.columns([2, 1])
     
