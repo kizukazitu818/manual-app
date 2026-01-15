@@ -21,13 +21,28 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ★ここが新機能！UIを強制的にカスタマイズするCSS★
+# アップロード欄の背景を「淡い朱色」にし、枠線を「濃い朱色」にします
+st.markdown("""
+    <style>
+    /* ファイルアップロード欄の背景色 */
+    [data-testid="stFileUploaderDropzone"] {
+        background-color: #FFF0F0; /* 淡い朱色 */
+        border: 1px dashed #FF4B4B; /* 枠線を朱色に */
+    }
+    /* サイドバーの背景色（念のためCSSでも指定） */
+    [data-testid="stSidebar"] {
+        background-color: #FFF0F0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 st.title("🛠️ Auto-Manual Producer (AMP)")
 st.caption("動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。")
 
-# --- 2. モデルリスト取得関数（キャッシュ付き） ---
+# --- 2. モデルリスト取得関数 ---
 @st.cache_data(ttl=600)
 def get_available_models(api_key):
-    """APIキーを使って、実際に使用可能なモデル一覧を取得する"""
     default_models = ["gemini-1.5-flash"]
     if not api_key: return default_models
     try:
@@ -42,7 +57,7 @@ def get_available_models(api_key):
     except Exception:
         return default_models
 
-# --- 3. サイドバー設定（ここを大改造！） ---
+# --- 3. サイドバー設定 ---
 with st.sidebar:
     st.header("設定")
     api_key = st.text_input("Google API Key", type="password")
@@ -52,10 +67,8 @@ with st.sidebar:
     st.header("🧠 AIモデル選択")
     
     if api_key:
-        # 1. まず利用可能な全モデルを取得
         available_models = get_available_models(api_key)
         
-        # 2. 目的別の選択肢を定義
         st.subheader("① 作成目的を選ぶ")
         scenario = st.radio(
             "どのような視点の手順書を作成しますか？",
@@ -65,37 +78,34 @@ with st.sidebar:
                 "📹 解析・記録視点（動画リンク用）",
                 "🚀 標準（バランス型）"
             ],
-            index=3, # デフォルトは標準
+            index=3,
             help="選んだ視点に合わせて、最適なAIモデルが自動的に推奨されます。"
         )
 
-        # 3. 選択されたシナリオに基づいて推奨モデルのキーワードを決める
         recommended_keyword = ""
         if "mechanic" in scenario or "メカニック" in scenario:
-            recommended_keyword = "gemini-2.5" # 2.5系を推奨
+            recommended_keyword = "gemini-2.5"
             st.info("💡 Point: 部品の劣化や緩みなど、設備の状態を細かく描写します。")
         elif "safety" in scenario or "安全管理" in scenario:
-            recommended_keyword = "gemini-3" # 3系を推奨
+            recommended_keyword = "gemini-3"
             st.info("💡 Point: 指差し確認や安全タグなど、ルールや安全行動を重視します。")
         elif "robotics" in scenario or "解析・記録" in scenario:
-            recommended_keyword = "robotics" # robotics系を推奨
+            recommended_keyword = "robotics"
             st.info("💡 Point: 「(00:15-00:20)」のように正確なタイムスタンプを記録します。")
         else:
-            recommended_keyword = "gemini-1.5-flash" # 標準は高速な1.5 Flash
+            recommended_keyword = "gemini-1.5-flash"
 
-        # 4. 推奨キーワードを含むモデルをリストから探し、デフォルトのインデックスを計算
         default_index = 0
         for i, model_name in enumerate(available_models):
             if recommended_keyword in model_name:
                 default_index = i
-                break # 最初に見つかったものを採用
+                break
         
         st.subheader("② 使用するモデルを確認")
         final_model_name = st.selectbox(
             "実際に使用するモデル（自動選択されます）",
             available_models,
-            index=default_index,
-            help="上の目的に合わせて推奨モデルが選択されていますが、手動で変更も可能です。"
+            index=default_index
         )
 
     else:
@@ -312,7 +322,6 @@ if uploaded_file is not None:
         if not api_key:
             st.error("⚠️ APIキーを入力してください！")
         else:
-            # ここで final_model_name を使う
             with st.spinner(f"AIエージェントを起動中（モデル: {final_model_name}）..."):
                 steps = process_video_with_gemini(temp_filename, api_key, final_model_name)
                 st.session_state.manual_steps = steps
@@ -322,7 +331,6 @@ if uploaded_file is not None:
     if st.session_state.manual_steps:
         steps = st.session_state.manual_steps
         
-        # 使用したモデル名を表示
         st.markdown(f"### ✍️ 手順の編集（使用モデル: {final_model_name}）")
         with st.form("edit_form"):
             for i, step in enumerate(steps):
