@@ -13,6 +13,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, Border, Side
 from openpyxl.drawing.image import Image as ExcelImage
 from gtts import gTTS
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
@@ -301,9 +302,19 @@ def process_video_with_gemini(video_path, api_key, selected_model):
         - timestampは必ず「秒数（数値）」だけにしてください。（例: 5.5）
         - 専門用語を正しく使い、曖昧な指示は具体化すること。
         """
+        
+        # ★ここで安全設定を緩和する（工場の機械などを「危険」と誤判定させないため）
+        safe = [
+            {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+            {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_NONE},
+            {"category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+            {"category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+        ]
+
         response = model.generate_content(
             [video_file, prompt],
-            generation_config={"response_mime_type": "application/json"}
+            generation_config={"response_mime_type": "application/json"},
+            safety_settings=safe
         )
         
         progress_bar.progress(100, text="完了！")
@@ -313,27 +324,26 @@ def process_video_with_gemini(video_path, api_key, selected_model):
         return json.loads(response.text)
 
     except Exception as e:
-        st.error(f"エラー: {e}")
+        # ここでのエラーを消さずに残す
+        st.error(f"エラーが発生しました: {e}")
         return []
 
 # --- 7. メインエリア ---
 st.title("📜 Nano Factory AI")
 
-# ★文字を大きく・太く変更！★
 st.markdown("""
     <p style='font-size: 1.3rem; font-weight: bold; color: #555; margin-bottom: 20px;'>
     動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。
     </p>
 """, unsafe_allow_html=True)
 
-# ★アップロード欄の文字も大きく・太く変更！★
 st.markdown("""
     <div style='font-size: 1.3rem; font-weight: bold; margin-bottom: 10px; display: flex; align-items: center;'>
     📂 作業動画をアップロードしてください
     </div>
 """, unsafe_allow_html=True)
 
-# 【修正点】空文字ではなく適当なラベルを入れ、visibilityで隠すのが正解！
+# visibility="collapsed"でラベルを隠し、自作の大きい見出しを使う（エラー回避）
 uploaded_file = st.file_uploader("動画アップロード", type=["mp4", "mov"], label_visibility="collapsed")
 
 if uploaded_file is not None:
@@ -368,8 +378,11 @@ if uploaded_file is not None:
         else:
             with st.spinner(f"AIエージェントを起動中（モデル: {final_model_name}）..."):
                 steps = process_video_with_gemini(temp_filename, api_key, final_model_name)
-                st.session_state.manual_steps = steps
-                st.rerun()
+                # ★修正ポイント：生成に成功したときだけ画面をリロードする
+                if steps:
+                    st.session_state.manual_steps = steps
+                    st.rerun()
+                # 失敗した場合はリロードせず、エラーメッセージを表示したままにする
     
     # --- 編集エリア ---
     if st.session_state.manual_steps:
