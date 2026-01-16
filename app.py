@@ -26,31 +26,26 @@ st.set_page_config(
 # ★UIカスタマイズ（丸文字フォント ＆ テックブルーテーマ）★
 st.markdown("""
     <style>
-    /* Google Fonts（丸文字）を読み込み */
     @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@300;400;700&display=swap');
 
-    /* アプリ全体のフォントを丸文字に変更 */
     html, body, [class*="css"] {
         font-family: 'M PLUS Rounded 1c', sans-serif !important;
     }
 
-    /* ファイルアップロード欄のデザイン */
     [data-testid="stFileUploaderDropzone"] {
-        background-color: #E6F3FF; /* 淡いテックブルー */
-        border: 2px dashed #007BFF; /* 枠線を少し太く */
+        background-color: #E6F3FF;
+        border: 2px dashed #007BFF;
         border-radius: 15px;
-        padding: 20px; /* 内側の余白を増やしてゆったりさせる */
+        padding: 20px;
     }
     [data-testid="stFileUploaderDropzone"] div {
         color: #0056b3;
     }
     
-    /* サイドバーの背景色 */
     [data-testid="stSidebar"] {
         background-color: #E6F3FF;
     }
     
-    /* ヘッダーの装飾 */
     h1 {
         border-bottom: 5px solid #FFD700;
         padding-bottom: 10px;
@@ -75,78 +70,7 @@ def get_available_models(api_key):
     except Exception:
         return default_models
 
-# --- 3. サイドバー設定 ---
-with st.sidebar:
-    # ロゴ表示
-    try:
-        st.image("logo.png", use_container_width=True)
-    except:
-        st.warning("logo.png をアップロードしてください")
-        st.header("🍌 Nano Banana")
-
-    st.markdown("### Manufacturing AI Tools")
-    st.divider()
-
-    st.header("設定")
-    api_key = st.text_input("Google API Key", type="password")
-    
-    st.divider()
-    
-    st.header("🧠 AIモデル選択")
-    
-    if api_key:
-        available_models = get_available_models(api_key)
-        
-        st.subheader("① 作成目的を選ぶ")
-        scenario = st.radio(
-            "どのような視点の手順書を作成しますか？",
-            [
-                "🔧 メカニック視点（点検・保全用）",
-                "🛡️ 安全管理者視点（教育・ルール用）",
-                "📹 解析・記録視点（動画リンク用）",
-                "🚀 標準（バランス型）"
-            ],
-            index=3,
-            help="選んだ視点に合わせて、最適なAIモデルが自動的に推奨されます。"
-        )
-
-        recommended_keyword = ""
-        if "mechanic" in scenario or "メカニック" in scenario:
-            recommended_keyword = "gemini-2.5"
-            st.info("💡 Point: 部品の劣化や緩みなど、設備の状態を細かく描写します。")
-        elif "safety" in scenario or "安全管理" in scenario:
-            recommended_keyword = "gemini-3"
-            st.info("💡 Point: 指差し確認や安全タグなど、ルールや安全行動を重視します。")
-        elif "robotics" in scenario or "解析・記録" in scenario:
-            recommended_keyword = "robotics"
-            st.info("💡 Point: 「(00:15-00:20)」のように正確なタイムスタンプを記録します。")
-        else:
-            recommended_keyword = "gemini-1.5-flash"
-
-        default_index = 0
-        for i, model_name in enumerate(available_models):
-            if recommended_keyword in model_name:
-                default_index = i
-                break
-        
-        st.subheader("② 使用するモデルを確認")
-        final_model_name = st.selectbox(
-            "実際に使用するモデル（自動選択されます）",
-            available_models,
-            index=default_index
-        )
-
-    else:
-        st.info("APIキーを入力すると、モデル選択メニューが表示されます。")
-        final_model_name = "gemini-1.5-flash"
-
-    st.divider()
-    st.header("📄 文書情報")
-    manual_number = st.text_input("マニュアル番号", value="SOP-001")
-    author_name = st.text_input("作成者", value="管理者")
-    create_date = st.date_input("作成日", datetime.date.today())
-
-# --- 4. データ処理用ヘルパー関数群 ---
+# --- 3. データ処理用ヘルパー関数群 ---
 def clean_timestamp(ts_value):
     if ts_value is None: return 0.0
     if isinstance(ts_value, (int, float)): return float(ts_value)
@@ -190,7 +114,7 @@ def generate_audio_bytes(text):
     except Exception:
         return None
 
-# --- 5. Excel作成関数 ---
+# --- 4. Excel作成関数 ---
 def create_excel_file(steps, m_num, m_author, m_date, video_path):
     wb = Workbook()
     ws = wb.active
@@ -270,7 +194,7 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
     wb.save(output)
     return output.getvalue()
 
-# --- 6. Gemini API処理 ---
+# --- 5. Gemini API処理 ---
 def process_video_with_gemini(video_path, api_key, selected_model):
     genai.configure(api_key=api_key)
     
@@ -303,7 +227,6 @@ def process_video_with_gemini(video_path, api_key, selected_model):
         - 専門用語を正しく使い、曖昧な指示は具体化すること。
         """
         
-        # ★ここで安全設定を緩和する（工場の機械などを「危険」と誤判定させないため）
         safe = [
             {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
             {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_NONE},
@@ -324,11 +247,110 @@ def process_video_with_gemini(video_path, api_key, selected_model):
         return json.loads(response.text)
 
     except Exception as e:
-        # ここでのエラーを消さずに残す
         st.error(f"エラーが発生しました: {e}")
         return []
 
-# --- 7. メインエリア ---
+# --- 6. サーバー掃除機能 ---
+def clear_api_storage(api_key):
+    if not api_key:
+        st.sidebar.error("APIキーを入力してください")
+        return
+    try:
+        genai.configure(api_key=api_key)
+        files = list(genai.list_files())
+        if not files:
+            st.sidebar.success("削除するファイルはありませんでした。")
+            return
+        
+        count = 0
+        progress = st.sidebar.progress(0, text="削除中...")
+        for i, f in enumerate(files):
+            genai.delete_file(f.name)
+            count += 1
+            progress.progress((i + 1) / len(files))
+        progress.empty()
+        st.sidebar.success(f"🧹 {count}個のファイルを削除しました！")
+    except Exception as e:
+        st.sidebar.error(f"削除エラー: {e}")
+
+# --- 7. サイドバー設定 ---
+with st.sidebar:
+    try:
+        st.image("logo.png", use_container_width=True)
+    except:
+        st.warning("logo.png をアップロードしてください")
+        st.header("🍌 Nano Banana")
+
+    st.markdown("### Manufacturing AI Tools")
+    st.divider()
+
+    st.header("設定")
+    api_key = st.text_input("Google API Key", type="password")
+    
+    st.divider()
+    
+    st.header("🧠 AIモデル選択")
+    
+    if api_key:
+        available_models = get_available_models(api_key)
+        
+        st.subheader("① 作成目的を選ぶ")
+        scenario = st.radio(
+            "どのような視点の手順書を作成しますか？",
+            [
+                "🔧 メカニック視点（点検・保全用）",
+                "🛡️ 安全管理者視点（教育・ルール用）",
+                "📹 解析・記録視点（動画リンク用）",
+                "🚀 標準（バランス型）"
+            ],
+            index=3,
+            help="選んだ視点に合わせて、最適なAIモデルが自動的に推奨されます。"
+        )
+
+        recommended_keyword = ""
+        if "mechanic" in scenario or "メカニック" in scenario:
+            recommended_keyword = "gemini-2.5"
+            st.info("💡 Point: 部品の劣化や緩みなど、設備の状態を細かく描写します。")
+        elif "safety" in scenario or "安全管理" in scenario:
+            recommended_keyword = "gemini-3"
+            st.info("💡 Point: 指差し確認や安全タグなど、ルールや安全行動を重視します。")
+        elif "robotics" in scenario or "解析・記録" in scenario:
+            recommended_keyword = "robotics"
+            st.info("💡 Point: 「(00:15-00:20)」のように正確なタイムスタンプを記録します。")
+        else:
+            recommended_keyword = "gemini-1.5-flash"
+
+        default_index = 0
+        for i, model_name in enumerate(available_models):
+            if recommended_keyword in model_name:
+                default_index = i
+                break
+        
+        st.subheader("② 使用するモデルを確認")
+        final_model_name = st.selectbox(
+            "実際に使用するモデル（自動選択されます）",
+            available_models,
+            index=default_index
+        )
+        
+        # ★ここに追加！メンテナンス機能★
+        st.divider()
+        with st.expander("🛠️ メンテナンス（容量がいっぱいの場合）"):
+            st.warning("「Quota exceeded」エラーが出たら、ここを押して古いファイルを削除してください。")
+            if st.button("🗑️ サーバーのゴミ箱を空にする", type="secondary"):
+                clear_api_storage(api_key)
+
+    else:
+        st.info("APIキーを入力すると、モデル選択メニューが表示されます。")
+        final_model_name = "gemini-1.5-flash"
+
+    st.divider()
+    st.header("📄 文書情報")
+    manual_number = st.text_input("マニュアル番号", value="SOP-001")
+    author_name = st.text_input("作成者", value="管理者")
+    create_date = st.date_input("作成日", datetime.date.today())
+
+# --- 8. メインエリア ---
 st.title("📜 Nano Factory AI")
 
 st.markdown("""
@@ -343,7 +365,6 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# visibility="collapsed"でラベルを隠し、自作の大きい見出しを使う（エラー回避）
 uploaded_file = st.file_uploader("動画アップロード", type=["mp4", "mov"], label_visibility="collapsed")
 
 if uploaded_file is not None:
@@ -378,13 +399,10 @@ if uploaded_file is not None:
         else:
             with st.spinner(f"AIエージェントを起動中（モデル: {final_model_name}）..."):
                 steps = process_video_with_gemini(temp_filename, api_key, final_model_name)
-                # ★修正ポイント：生成に成功したときだけ画面をリロードする
                 if steps:
                     st.session_state.manual_steps = steps
                     st.rerun()
-                # 失敗した場合はリロードせず、エラーメッセージを表示したままにする
     
-    # --- 編集エリア ---
     if st.session_state.manual_steps:
         steps = st.session_state.manual_steps
         
@@ -417,7 +435,6 @@ if uploaded_file is not None:
             if submitted:
                 st.success("内容を更新しました！下のプレビューを確認してください。")
 
-        # --- プレビュー ---
         st.markdown("### 📄 完成イメージ（プレビュー & 音声確認）")
         with st.container(border=True): 
             st.markdown(f"**No:** {manual_number}　　**作成日:** {create_date}　　**作成者:** {author_name}")
