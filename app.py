@@ -333,8 +333,8 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# label_visibilityを削除してエラーを回避
-uploaded_file = st.file_uploader("", type=["mp4", "mov"])
+# 【修正点】空文字ではなく適当なラベルを入れ、visibilityで隠すのが正解！
+uploaded_file = st.file_uploader("動画アップロード", type=["mp4", "mov"], label_visibility="collapsed")
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
