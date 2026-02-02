@@ -14,6 +14,8 @@ from openpyxl.styles import Alignment, Font, Border, Side
 from openpyxl.drawing.image import Image as ExcelImage
 from gtts import gTTS
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+# ★新しいライブラリ：お絵かき機能★
+from streamlit_drawable_canvas import st_canvas
 
 # --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
@@ -23,7 +25,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ★UIカスタマイズ（丸文字フォント ＆ テックブルーテーマ）★
+# ★UIカスタマイズ★
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@300;400;700&display=swap');
@@ -37,9 +39,6 @@ st.markdown("""
         border: 2px dashed #007BFF;
         border-radius: 15px;
         padding: 20px;
-    }
-    [data-testid="stFileUploaderDropzone"] div {
-        color: #0056b3;
     }
     
     [data-testid="stSidebar"] {
@@ -87,19 +86,15 @@ def clean_timestamp(ts_value):
         if numbers: return float(numbers[0])
     return 0.0
 
-def extract_frame_for_web(video_path, seconds):
+def extract_frame_as_pil(video_path, seconds):
+    """動画から指定秒数のフレームをPIL画像として取得"""
     cap = cv2.VideoCapture(video_path)
     cap.set(cv2.CAP_PROP_POS_MSEC, seconds * 1000)
     ret, frame = cap.read()
     cap.release()
     if ret:
-        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    return None
-
-def extract_frame_for_excel(video_path, seconds):
-    frame_rgb = extract_frame_for_web(video_path, seconds)
-    if frame_rgb is not None:
-        return PILImage.fromarray(frame_rgb)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return PILImage.fromarray(frame)
     return None
 
 @st.cache_data
@@ -114,7 +109,7 @@ def generate_audio_bytes(text):
     except Exception:
         return None
 
-# --- 4. Excel作成関数 ---
+# --- 4. Excel作成関数（加工画像を反映するように更新） ---
 def create_excel_file(steps, m_num, m_author, m_date, video_path):
     wb = Workbook()
     ws = wb.active
@@ -163,23 +158,40 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
         
         cell_img = ws[f'B{current_row}']
         cell_img.border = thin_border
-        ts = clean_timestamp(step.get('timestamp', 0))
         
-        if video_path and ts >= 0:
+        # ★ここが重要：加工された画像データがあればそれを使う
+        final_img = None
+        
+        # 1. まず加工済み画像データ(numpy array)があるか確認
+        if 'edited_image_data' in step and step['edited_image_data'] is not None:
             try:
-                pil_img = extract_frame_for_excel(video_path, ts)
-                if pil_img:
-                    pil_img.thumbnail((320, 240))
-                    img_byte_arr = BytesIO()
-                    pil_img.save(img_byte_arr, format='PNG')
-                    img_byte_arr.seek(0)
-                    excel_img = ExcelImage(img_byte_arr)
-                    excel_img.anchor = f'B{current_row}'
-                    ws.add_image(excel_img)
-                else:
-                    cell_img.value = "[画像取得失敗]"
+                # RGBAのnumpy配列をPIL画像に変換
+                final_img = PILImage.fromarray(step['edited_image_data'].astype('uint8'), 'RGBA')
+                # 背景が透明な場合の対策（白背景と合成）
+                background = PILImage.new("RGB", final_img.size, (255, 255, 255))
+                background.paste(final_img, mask=final_img.split()[3]) # 3 is alpha channel
+                final_img = background
             except Exception:
-                cell_img.value = "[画像エラー]"
+                final_img = None
+
+        # 2. なければ動画から元のフレームを取得
+        if final_img is None and video_path:
+            ts = clean_timestamp(step.get('timestamp', 0))
+            if ts >= 0:
+                final_img = extract_frame_as_pil(video_path, ts)
+
+        # 3. 画像をExcelに貼り付け
+        if final_img:
+            try:
+                final_img.thumbnail((320, 240))
+                img_byte_arr = BytesIO()
+                final_img.save(img_byte_arr, format='PNG')
+                img_byte_arr.seek(0)
+                excel_img = ExcelImage(img_byte_arr)
+                excel_img.anchor = f'B{current_row}'
+                ws.add_image(excel_img)
+            except Exception:
+                cell_img.value = "[画像処理エラー]"
         else:
             cell_img.value = "[画像なし]"
 
@@ -197,9 +209,7 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
 # --- 5. Gemini API処理 ---
 def process_video_with_gemini(video_path, api_key, selected_model):
     genai.configure(api_key=api_key)
-    
     progress_bar = st.progress(0, text="準備中...")
-    
     try:
         progress_bar.progress(10, text="📤 動画をAIサーバーにアップロード中...")
         video_file = genai.upload_file(path=video_path)
@@ -213,7 +223,6 @@ def process_video_with_gemini(video_path, api_key, selected_model):
             raise ValueError("動画の処理に失敗しました。")
 
         progress_bar.progress(60, text=f"🤖 マニュアルを生成中...（モデル: {selected_model}）")
-        
         model = genai.GenerativeModel(model_name=selected_model)
         
         prompt = """
@@ -224,28 +233,22 @@ def process_video_with_gemini(video_path, api_key, selected_model):
         ]
         注意点: 
         - timestampは必ず「秒数（数値）」だけにしてください。（例: 5.5）
-        - 専門用語を正しく使い、曖昧な指示は具体化すること。
         """
-        
         safe = [
             {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
             {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_NONE},
             {"category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": HarmBlockThreshold.BLOCK_NONE},
             {"category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
         ]
-
         response = model.generate_content(
             [video_file, prompt],
             generation_config={"response_mime_type": "application/json"},
             safety_settings=safe
         )
-        
         progress_bar.progress(100, text="完了！")
         time.sleep(1)
         progress_bar.empty()
-        
         return json.loads(response.text)
-
     except Exception as e:
         st.error(f"エラーが発生しました: {e}")
         return []
@@ -261,11 +264,11 @@ def clear_api_storage(api_key):
         if not files:
             st.sidebar.success("削除するファイルはありませんでした。")
             return
-        
         count = 0
         progress = st.sidebar.progress(0, text="削除中...")
         for i, f in enumerate(files):
-            genai.delete_file(f.name)
+            try: genai.delete_file(f.name)
+            except: pass
             count += 1
             progress.progress((i + 1) / len(files))
         progress.empty()
@@ -275,73 +278,42 @@ def clear_api_storage(api_key):
 
 # --- 7. サイドバー設定 ---
 with st.sidebar:
-    try:
-        st.image("logo.png", use_container_width=True)
+    try: st.image("logo.png", use_container_width=True)
     except:
         st.warning("logo.png をアップロードしてください")
         st.header("🍌 Nano Banana")
 
     st.markdown("### Manufacturing AI Tools")
     st.divider()
-
     st.header("設定")
     api_key = st.text_input("Google API Key", type="password")
-    
     st.divider()
-    
     st.header("🧠 AIモデル選択")
     
     if api_key:
         available_models = get_available_models(api_key)
-        
-        st.subheader("① 作成目的を選ぶ")
         scenario = st.radio(
             "どのような視点の手順書を作成しますか？",
-            [
-                "🔧 メカニック視点（点検・保全用）",
-                "🛡️ 安全管理者視点（教育・ルール用）",
-                "📹 解析・記録視点（動画リンク用）",
-                "🚀 標準（バランス型）"
-            ],
-            index=3,
-            help="選んだ視点に合わせて、最適なAIモデルが自動的に推奨されます。"
+            ["🔧 メカニック視点", "🛡️ 安全管理者視点", "📹 解析・記録視点", "🚀 標準"],
+            index=3
         )
-
-        recommended_keyword = ""
-        if "mechanic" in scenario or "メカニック" in scenario:
-            recommended_keyword = "gemini-2.5"
-            st.info("💡 Point: 部品の劣化や緩みなど、設備の状態を細かく描写します。")
-        elif "safety" in scenario or "安全管理" in scenario:
-            recommended_keyword = "gemini-3"
-            st.info("💡 Point: 指差し確認や安全タグなど、ルールや安全行動を重視します。")
-        elif "robotics" in scenario or "解析・記録" in scenario:
-            recommended_keyword = "robotics"
-            st.info("💡 Point: 「(00:15-00:20)」のように正確なタイムスタンプを記録します。")
-        else:
-            recommended_keyword = "gemini-1.5-flash"
-
+        recommended_keyword = "gemini-2.5-flash"
+        if "メカニック" in scenario: recommended_keyword = "gemini-2.5"
+        elif "安全" in scenario: recommended_keyword = "gemini-3"
+        elif "解析" in scenario: recommended_keyword = "robotics"
+        
         default_index = 0
-        for i, model_name in enumerate(available_models):
-            if recommended_keyword in model_name:
+        for i, m in enumerate(available_models):
+            if recommended_keyword in m:
                 default_index = i
                 break
+        final_model_name = st.selectbox("使用モデル", available_models, index=default_index)
         
-        st.subheader("② 使用するモデルを確認")
-        final_model_name = st.selectbox(
-            "実際に使用するモデル（自動選択されます）",
-            available_models,
-            index=default_index
-        )
-        
-        # ★ここに追加！メンテナンス機能★
         st.divider()
-        with st.expander("🛠️ メンテナンス（容量がいっぱいの場合）"):
-            st.warning("「Quota exceeded」エラーが出たら、ここを押して古いファイルを削除してください。")
+        with st.expander("🛠️ メンテナンス"):
             if st.button("🗑️ サーバーのゴミ箱を空にする", type="secondary"):
                 clear_api_storage(api_key)
-
     else:
-        st.info("APIキーを入力すると、モデル選択メニューが表示されます。")
         final_model_name = "gemini-1.5-flash"
 
     st.divider()
@@ -352,18 +324,8 @@ with st.sidebar:
 
 # --- 8. メインエリア ---
 st.title("📜 Nano Factory AI")
-
-st.markdown("""
-    <p style='font-size: 1.3rem; font-weight: bold; color: #555; margin-bottom: 20px;'>
-    動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。
-    </p>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-    <div style='font-size: 1.3rem; font-weight: bold; margin-bottom: 10px; display: flex; align-items: center;'>
-    📂 作業動画をアップロードしてください
-    </div>
-""", unsafe_allow_html=True)
+st.markdown("""<p style='font-size: 1.3rem; font-weight: bold; color: #555; margin-bottom: 20px;'>動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。</p>""", unsafe_allow_html=True)
+st.markdown("""<div style='font-size: 1.3rem; font-weight: bold; margin-bottom: 10px; display: flex; align-items: center;'>📂 作業動画をアップロードしてください</div>""", unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("動画アップロード", type=["mp4", "mov"], label_visibility="collapsed")
 
@@ -372,22 +334,13 @@ if uploaded_file is not None:
     with open(temp_filename, "wb") as f: f.write(uploaded_file.read())
 
     with st.expander("⚙️ 表示サイズ調整"):
-        col_size1, col_size2 = st.columns(2)
-        with col_size1:
-            video_width = st.slider("動画プレイヤーのサイズ (%)", 10, 100, 50)
-        with col_size2:
-            img_width = st.slider("編集画像のサイズ (%)", 10, 100, 100)
+        video_width = st.slider("動画プレイヤーのサイズ (%)", 10, 100, 50)
 
     st.subheader("🎥 現場動画（元データ）")
-    
-    left_padding = (100 - video_width) / 2
-    right_padding = (100 - video_width) / 2
-    cols = st.columns([max(0.1, left_padding), video_width, max(0.1, right_padding)])
-    with cols[1]:
-        st.video(uploaded_file)
+    cols = st.columns([((100-video_width)/2), video_width, ((100-video_width)/2)])
+    with cols[1]: st.video(uploaded_file)
     
     st.divider()
-    
     st.subheader("📝 編集 & プレビュー")
     
     if "manual_steps" not in st.session_state:
@@ -403,66 +356,75 @@ if uploaded_file is not None:
                     st.session_state.manual_steps = steps
                     st.rerun()
     
+    # --- 編集エリア（ここがお絵かき機能！） ---
     if st.session_state.manual_steps:
         steps = st.session_state.manual_steps
         
         st.markdown(f"### ✍️ 手順の編集（使用モデル: {final_model_name}）")
-        with st.form("edit_form"):
-            for i, step in enumerate(steps):
-                st.markdown(f"#### 手順 {i+1}")
-                col_ratio_img = 1 + (img_width / 100)
-                col_ratio_text = 4 - (img_width / 100)
-                col_img, col_text = st.columns([col_ratio_img, col_ratio_text])
+        st.info("💡 画像の上でドラッグすると、四角形や丸を描き込めます。色やツールを変更して、重要なポイントを強調してください。")
+
+        # ツールバー設定（全画像共通）
+        tool_cols = st.columns([1, 1, 1, 2])
+        with tool_cols[0]:
+            drawing_mode = st.selectbox("ツール:", ("rect", "circle", "line", "text", "transform"), index=0)
+        with tool_cols[1]:
+            stroke_color = st.color_picker("ペンの色", "#FF0000") # 赤をデフォルトに
+        with tool_cols[2]:
+            stroke_width = st.slider("線の太さ", 1, 10, 3)
+        
+        # フォーム開始
+        # ※ st_canvasはフォームの中だとリアルタイム更新しにくいので、フォームの外に出すのが一般的ですが
+        # 今回は「確定ボタン」で一括処理するフローにします。
+        
+        for i, step in enumerate(steps):
+            st.markdown(f"#### 手順 {i+1}")
+            
+            # 画像とテキストの2カラムレイアウト
+            col_img, col_text = st.columns([1.5, 1])
+            
+            with col_img:
+                current_ts = clean_timestamp(step.get('timestamp', 0.0))
+                # タイムスタンプ変更用
+                new_timestamp = st.number_input(f"画像位置(秒) #{i+1}", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}")
                 
-                with col_img:
-                    current_ts = clean_timestamp(step.get('timestamp', 0.0))
-                    new_timestamp = st.number_input(
-                        f"画像位置(秒)", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}"
+                # 画像の取得（PIL形式）
+                bg_image = extract_frame_as_pil(temp_filename, new_timestamp)
+                
+                if bg_image:
+                    # ★お絵かきキャンバスの設置★
+                    canvas_result = st_canvas(
+                        fill_color="rgba(255, 165, 0, 0.1)",  # 塗りつぶし色（薄いオレンジ）
+                        stroke_width=stroke_width,
+                        stroke_color=stroke_color,
+                        background_image=bg_image,
+                        update_streamlit=True, # 描くたびに更新
+                        height=300, # 高さを固定（使いやすくするため）
+                        drawing_mode=drawing_mode,
+                        key=f"canvas_{i}", # 固有のID
+                        display_toolbar=True, # キャンバス下のツールバーを表示
                     )
-                    frame_rgb = extract_frame_for_web(temp_filename, new_timestamp)
-                    if frame_rgb is not None:
-                         st.image(frame_rgb, caption=f"{new_timestamp}秒時点", width=None, use_container_width=True)
-                    steps[i]['timestamp'] = new_timestamp
-
-                with col_text:
-                    new_title = st.text_input(f"見出し", value=step['title'], key=f"title_{i}")
-                    new_text = st.text_area(f"説明", value=step['text'], key=f"text_{i}", height=150)
-                    steps[i]['title'] = new_title
-                    steps[i]['text'] = new_text
-                st.divider()
-            
-            submitted = st.form_submit_button("✅ 編集内容を確定してプレビューへ")
-            if submitted:
-                st.success("内容を更新しました！下のプレビューを確認してください。")
-
-        st.markdown("### 📄 完成イメージ（プレビュー & 音声確認）")
-        with st.container(border=True): 
-            st.markdown(f"**No:** {manual_number}　　**作成日:** {create_date}　　**作成者:** {author_name}")
-            st.markdown("## 標準作業手順書")
-            st.divider()
-            
-            for i, step in enumerate(steps, 1):
-                p_col1, p_col2, p_col3 = st.columns([0.5, 3, 4])
-                with p_col1: st.markdown(f"### {i}")
-                with p_col2:
-                    ts = clean_timestamp(step.get('timestamp', 0))
-                    if temp_filename:
-                        frame_rgb = extract_frame_for_web(temp_filename, ts)
-                        if frame_rgb is not None:
-                            st.image(frame_rgb, use_container_width=True)
-                with p_col3:
-                    st.markdown(f"#### {step['title']}")
-                    st.write(step['text'])
                     
-                    read_text = f"手順{i}。{step['title']}。{step['text']}"
-                    audio_bytes = generate_audio_bytes(read_text)
-                    if audio_bytes:
-                        st.audio(audio_bytes, format='audio/mp3')
-                st.divider()
+                    # 描画結果を保存（Excel出力用）
+                    if canvas_result.image_data is not None:
+                        steps[i]['edited_image_data'] = canvas_result.image_data
+                else:
+                    st.warning("画像を取得できませんでした")
 
+                # タイムスタンプ更新
+                steps[i]['timestamp'] = new_timestamp
+
+            with col_text:
+                new_title = st.text_input(f"見出し #{i+1}", value=step['title'], key=f"title_{i}")
+                new_text = st.text_area(f"説明 #{i+1}", value=step['text'], key=f"text_{i}", height=200)
+                steps[i]['title'] = new_title
+                steps[i]['text'] = new_text
+            
+            st.divider()
+
+        # Excel作成ボタン
         excel_data = create_excel_file(steps, manual_number, author_name, create_date, temp_filename)
         st.download_button(
-            label="📥 最終版Excelをダウンロード",
+            label="📥 編集内容でExcelを作成・ダウンロード",
             data=excel_data,
             file_name=f"{manual_number}_manual.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
