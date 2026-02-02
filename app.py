@@ -14,7 +14,7 @@ from openpyxl.styles import Alignment, Font, Border, Side
 from openpyxl.drawing.image import Image as ExcelImage
 from gtts import gTTS
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-# ★新しいライブラリ：お絵かき機能★
+# お絵かき機能
 from streamlit_drawable_canvas import st_canvas
 
 # --- 1. アプリ全体の基本設定 ---
@@ -55,7 +55,7 @@ st.markdown("""
 # --- 2. モデルリスト取得関数 ---
 @st.cache_data(ttl=600)
 def get_available_models(api_key):
-    default_models = ["gemini-1.5-flash"]
+    default_models = ["gemini-2.5-flash"]
     if not api_key: return default_models
     try:
         genai.configure(api_key=api_key)
@@ -87,7 +87,6 @@ def clean_timestamp(ts_value):
     return 0.0
 
 def extract_frame_as_pil(video_path, seconds):
-    """動画から指定秒数のフレームをPIL画像として取得"""
     cap = cv2.VideoCapture(video_path)
     cap.set(cv2.CAP_PROP_POS_MSEC, seconds * 1000)
     ret, frame = cap.read()
@@ -109,7 +108,7 @@ def generate_audio_bytes(text):
     except Exception:
         return None
 
-# --- 4. Excel作成関数（加工画像を反映するように更新） ---
+# --- 4. Excel作成関数 ---
 def create_excel_file(steps, m_num, m_author, m_date, video_path):
     wb = Workbook()
     ws = wb.active
@@ -159,28 +158,21 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
         cell_img = ws[f'B{current_row}']
         cell_img.border = thin_border
         
-        # ★ここが重要：加工された画像データがあればそれを使う
         final_img = None
-        
-        # 1. まず加工済み画像データ(numpy array)があるか確認
         if 'edited_image_data' in step and step['edited_image_data'] is not None:
             try:
-                # RGBAのnumpy配列をPIL画像に変換
                 final_img = PILImage.fromarray(step['edited_image_data'].astype('uint8'), 'RGBA')
-                # 背景が透明な場合の対策（白背景と合成）
                 background = PILImage.new("RGB", final_img.size, (255, 255, 255))
-                background.paste(final_img, mask=final_img.split()[3]) # 3 is alpha channel
+                background.paste(final_img, mask=final_img.split()[3])
                 final_img = background
             except Exception:
                 final_img = None
 
-        # 2. なければ動画から元のフレームを取得
         if final_img is None and video_path:
             ts = clean_timestamp(step.get('timestamp', 0))
             if ts >= 0:
                 final_img = extract_frame_as_pil(video_path, ts)
 
-        # 3. 画像をExcelに貼り付け
         if final_img:
             try:
                 final_img.thumbnail((320, 240))
@@ -297,7 +289,7 @@ with st.sidebar:
             ["🔧 メカニック視点", "🛡️ 安全管理者視点", "📹 解析・記録視点", "🚀 標準"],
             index=3
         )
-        recommended_keyword = "gemini-2.5-flash"
+        recommended_keyword = "gemini-1.5-flash"
         if "メカニック" in scenario: recommended_keyword = "gemini-2.5"
         elif "安全" in scenario: recommended_keyword = "gemini-3"
         elif "解析" in scenario: recommended_keyword = "robotics"
@@ -331,7 +323,14 @@ uploaded_file = st.file_uploader("動画アップロード", type=["mp4", "mov"]
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
-    with open(temp_filename, "wb") as f: f.write(uploaded_file.read())
+    # ★修正ポイント：メモリ節約モード（チャンク書き込み）★
+    # これで大きな動画でもクラッシュしません
+    with open(temp_filename, "wb") as f:
+        while True:
+            chunk = uploaded_file.read(1024 * 1024) # 1MBずつ読み込む
+            if not chunk:
+                break
+            f.write(chunk)
 
     with st.expander("⚙️ 表示サイズ調整"):
         video_width = st.slider("動画プレイヤーのサイズ (%)", 10, 100, 50)
@@ -356,61 +355,36 @@ if uploaded_file is not None:
                     st.session_state.manual_steps = steps
                     st.rerun()
     
-    # --- 編集エリア（ここがお絵かき機能！） ---
     if st.session_state.manual_steps:
         steps = st.session_state.manual_steps
         
         st.markdown(f"### ✍️ 手順の編集（使用モデル: {final_model_name}）")
-        st.info("💡 画像の上でドラッグすると、四角形や丸を描き込めます。色やツールを変更して、重要なポイントを強調してください。")
+        st.info("💡 画像の上でドラッグすると、四角形や丸を描き込めます。")
 
-        # ツールバー設定（全画像共通）
         tool_cols = st.columns([1, 1, 1, 2])
-        with tool_cols[0]:
-            drawing_mode = st.selectbox("ツール:", ("rect", "circle", "line", "text", "transform"), index=0)
-        with tool_cols[1]:
-            stroke_color = st.color_picker("ペンの色", "#FF0000") # 赤をデフォルトに
-        with tool_cols[2]:
-            stroke_width = st.slider("線の太さ", 1, 10, 3)
-        
-        # フォーム開始
-        # ※ st_canvasはフォームの中だとリアルタイム更新しにくいので、フォームの外に出すのが一般的ですが
-        # 今回は「確定ボタン」で一括処理するフローにします。
+        with tool_cols[0]: drawing_mode = st.selectbox("ツール:", ("rect", "circle", "line", "text", "transform"), index=0)
+        with tool_cols[1]: stroke_color = st.color_picker("ペンの色", "#FF0000")
+        with tool_cols[2]: stroke_width = st.slider("線の太さ", 1, 10, 3)
         
         for i, step in enumerate(steps):
             st.markdown(f"#### 手順 {i+1}")
-            
-            # 画像とテキストの2カラムレイアウト
             col_img, col_text = st.columns([1.5, 1])
-            
             with col_img:
                 current_ts = clean_timestamp(step.get('timestamp', 0.0))
-                # タイムスタンプ変更用
                 new_timestamp = st.number_input(f"画像位置(秒) #{i+1}", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}")
-                
-                # 画像の取得（PIL形式）
                 bg_image = extract_frame_as_pil(temp_filename, new_timestamp)
-                
                 if bg_image:
-                    # ★お絵かきキャンバスの設置★
                     canvas_result = st_canvas(
-                        fill_color="rgba(255, 165, 0, 0.1)",  # 塗りつぶし色（薄いオレンジ）
-                        stroke_width=stroke_width,
-                        stroke_color=stroke_color,
-                        background_image=bg_image,
-                        update_streamlit=True, # 描くたびに更新
-                        height=300, # 高さを固定（使いやすくするため）
-                        drawing_mode=drawing_mode,
-                        key=f"canvas_{i}", # 固有のID
-                        display_toolbar=True, # キャンバス下のツールバーを表示
+                        fill_color="rgba(255, 165, 0, 0.1)",
+                        stroke_width=stroke_width, stroke_color=stroke_color,
+                        background_image=bg_image, update_streamlit=True,
+                        height=300, drawing_mode=drawing_mode,
+                        key=f"canvas_{i}", display_toolbar=True,
                     )
-                    
-                    # 描画結果を保存（Excel出力用）
                     if canvas_result.image_data is not None:
                         steps[i]['edited_image_data'] = canvas_result.image_data
                 else:
                     st.warning("画像を取得できませんでした")
-
-                # タイムスタンプ更新
                 steps[i]['timestamp'] = new_timestamp
 
             with col_text:
@@ -418,10 +392,8 @@ if uploaded_file is not None:
                 new_text = st.text_area(f"説明 #{i+1}", value=step['text'], key=f"text_{i}", height=200)
                 steps[i]['title'] = new_title
                 steps[i]['text'] = new_text
-            
             st.divider()
 
-        # Excel作成ボタン
         excel_data = create_excel_file(steps, manual_number, author_name, create_date, temp_filename)
         st.download_button(
             label="📥 編集内容でExcelを作成・ダウンロード",
