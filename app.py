@@ -332,7 +332,7 @@ with st.sidebar:
             ["🔧 メカニック視点", "🛡️ 安全管理者視点", "📹 解析・記録視点", "🚀 標準"],
             index=3
         )
-        recommended_keyword = "gemini-1.5-flash"
+        recommended_keyword = "gemini-2.5-flash"
         if "メカニック" in scenario: recommended_keyword = "gemini-2.5"
         elif "安全" in scenario: recommended_keyword = "gemini-3"
         elif "解析" in scenario: recommended_keyword = "robotics"
@@ -461,3 +461,4 @@ if uploaded_file is not None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary"
         )
+
