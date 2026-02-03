@@ -18,28 +18,23 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from streamlit_drawable_canvas import st_canvas
 import streamlit_drawable_canvas as canvas_lib
 
-# --- 0. ライブラリの不具合を修正するパッチ（ここが重要！） ---
-def fix_streamlit_canvas_error():
-    """
-    streamlit-drawable-canvasライブラリが最新のStreamlitで
-    エラーを起こす問題を、強制的に修正する関数
-    """
-    # 1. 画像リサイズ関数の修正（文字データを渡してもエラーにならないようにする）
-    original_resize = canvas_lib._resize_img
-    def patched_resize(image, height, width):
-        if isinstance(image, str):
-            return image # 文字データならそのまま返す（何もしない）
-        return original_resize(image, height, width)
-    canvas_lib._resize_img = patched_resize
+# --- 0. 強力な修正パッチ（ここが重要！） ---
+# ライブラリが古い「image_to_url」を探してエラーになるのを防ぐため、
+# 自作の変換関数を強制的に埋め込みます。
+def fix_canvas_library():
+    def custom_image_to_url(image, width, clamp, channels, output_format, image_id):
+        # 画像をBase64のURL文字列に変換して返す
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        return f"data:image/png;base64,{img_str}"
 
-    # 2. 画像URL変換関数の修正（削除された機能を復活させる）
+    # ライブラリ内のモジュールに自作関数を注入
     if hasattr(canvas_lib, 'st_image'):
-        def image_to_url(image, width, clamp, channels, output_format, image_id):
-            return image # 文字データならそのまま返す
-        canvas_lib.st_image.image_to_url = image_to_url
+        canvas_lib.st_image.image_to_url = custom_image_to_url
 
 # アプリ起動時にパッチを適用
-fix_streamlit_canvas_error()
+fix_canvas_library()
 
 # --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
@@ -87,6 +82,7 @@ def get_available_models(api_key):
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
+                # 無料枠で使えないモデルを除外
                 if "deep-research" in name or "ultra" in name:
                     continue
                 models.append(name)
@@ -126,12 +122,6 @@ def extract_frame_as_pil(video_path, seconds):
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return PILImage.fromarray(frame)
     return None
-
-def pil_to_base64(image):
-    buffered = BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
 
 @st.cache_data
 def generate_audio_bytes(text):
@@ -329,7 +319,7 @@ with st.sidebar:
             ["🔧 メカニック視点", "🛡️ 安全管理者視点", "📹 解析・記録視点", "🚀 標準"],
             index=3
         )
-        recommended_keyword = "gemini-2.5-flash"
+        recommended_keyword = "gemini-1.5-flash"
         if "メカニック" in scenario: recommended_keyword = "gemini-2.5"
         elif "安全" in scenario: recommended_keyword = "gemini-3"
         elif "解析" in scenario: recommended_keyword = "robotics"
@@ -419,16 +409,13 @@ if uploaded_file is not None:
                 current_ts = clean_timestamp(step.get('timestamp', 0.0))
                 new_timestamp = st.number_input(f"画像位置(秒) #{i+1}", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}")
                 
-                # 画像の取得と変換
                 bg_image = extract_frame_as_pil(temp_filename, new_timestamp)
                 if bg_image:
-                    # ここでBase64に変換してからキャンバスに渡す（エラー回避）
-                    bg_base64 = pil_to_base64(bg_image)
-                    
+                    # ★重要：パッチを当てたので、PIL画像をそのまま渡してOKです！
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.1)",
                         stroke_width=stroke_width, stroke_color=stroke_color,
-                        background_image=bg_base64, # Base64文字列を渡す
+                        background_image=bg_image, 
                         update_streamlit=True,
                         height=300, drawing_mode=drawing_mode,
                         key=f"canvas_{i}", display_toolbar=True,
