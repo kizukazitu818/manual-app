@@ -18,25 +18,18 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from streamlit_drawable_canvas import st_canvas
 import streamlit_drawable_canvas as canvas_lib
 
-# --- 0. 決定的修正パッチ（ここが最重要！） ---
-# ライブラリが古い機能を使おうとしてエラーになるのを防ぐため、
-# 画像変換機能だけを、私たちの手作りコードにこっそり差し替えます。
+# --- 0. 決定的修正パッチ ---
+# ライブラリの不具合を回避するためのパッチです。
 def fix_canvas_library():
-    # 画像を「データURL（文字の羅列）」に変換する関数を自作
     def custom_image_to_url(image, width, clamp, channels, output_format, image_id):
         buffered = BytesIO()
-        # 画像をPNG形式でメモリに保存
         image.save(buffered, format="PNG")
-        # Base64文字列に変換
         img_str = base64.b64encode(buffered.getvalue()).decode()
-        # データURL形式で返す（これでブラウザが画像として認識できる）
         return f"data:image/png;base64,{img_str}"
 
-    # ライブラリの中にある「st_image」という部品の「image_to_url」を、自作関数で上書きする
     if hasattr(canvas_lib, 'st_image'):
         canvas_lib.st_image.image_to_url = custom_image_to_url
 
-# アプリ起動時にこのパッチを適用！
 fix_canvas_library()
 
 # --- 1. アプリ全体の基本設定 ---
@@ -85,7 +78,6 @@ def get_available_models(api_key):
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
-                # 無料枠で使えないモデルを除外
                 if "deep-research" in name or "ultra" in name:
                     continue
                 models.append(name)
@@ -138,7 +130,7 @@ def generate_audio_bytes(text):
     except Exception:
         return None
 
-# --- 4. Excel作成関数 ---
+# --- 4. Excel作成関数（画像を合成するように修正） ---
 def create_excel_file(steps, m_num, m_author, m_date, video_path):
     wb = Workbook()
     ws = wb.active
@@ -188,24 +180,42 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
         cell_img = ws[f'B{current_row}']
         cell_img.border = thin_border
         
+        # --- 画像合成ロジック（修正版） ---
         final_img = None
-        if 'edited_image_data' in step and step['edited_image_data'] is not None:
-            try:
-                final_img = PILImage.fromarray(step['edited_image_data'].astype('uint8'), 'RGBA')
-                background = PILImage.new("RGB", final_img.size, (255, 255, 255))
-                background.paste(final_img, mask=final_img.split()[3])
-                final_img = background
-            except Exception:
-                final_img = None
-
-        if final_img is None and video_path:
+        
+        # 1. まず元の動画フレームを取得（必須）
+        if video_path:
             ts = clean_timestamp(step.get('timestamp', 0))
             if ts >= 0:
                 final_img = extract_frame_as_pil(video_path, ts)
 
+        # 2. お絵かきデータがあれば、元の画像の上に重ねる
+        if final_img and 'edited_image_data' in step and step['edited_image_data'] is not None:
+            try:
+                # お絵かきデータを画像化（透明背景）
+                drawing_layer = PILImage.fromarray(step['edited_image_data'].astype('uint8'), 'RGBA')
+                
+                # キャンバスの高さ固定(300px)に合わせて、元画像もリサイズして合わせる
+                # (こうしないと描画位置がズレるため、Excel用に見栄え良く統一します)
+                target_height = 300
+                aspect_ratio = final_img.width / final_img.height
+                target_width = int(target_height * aspect_ratio)
+                
+                # 元画像をリサイズ
+                final_img = final_img.resize((target_width, target_height), PILImage.Resampling.LANCZOS)
+                # お絵かき層も同じサイズにリサイズ
+                drawing_layer = drawing_layer.resize((target_width, target_height), PILImage.Resampling.LANCZOS)
+                
+                # 合成！
+                final_img.paste(drawing_layer, (0, 0), drawing_layer)
+                
+            except Exception as e:
+                print(f"Image merge error: {e}")
+                # エラーが出ても、元の画像だけは出力するようにする
+
         if final_img:
             try:
-                final_img.thumbnail((320, 240))
+                final_img.thumbnail((320, 240)) # Excelのセルサイズに合わせる
                 img_byte_arr = BytesIO()
                 final_img.save(img_byte_arr, format='PNG')
                 img_byte_arr.seek(0)
@@ -322,7 +332,7 @@ with st.sidebar:
             ["🔧 メカニック視点", "🛡️ 安全管理者視点", "📹 解析・記録視点", "🚀 標準"],
             index=3
         )
-        recommended_keyword = "gemini-2.5-flash"
+        recommended_keyword = "gemini-1.5-flash"
         if "メカニック" in scenario: recommended_keyword = "gemini-2.5"
         elif "安全" in scenario: recommended_keyword = "gemini-3"
         elif "解析" in scenario: recommended_keyword = "robotics"
@@ -412,17 +422,24 @@ if uploaded_file is not None:
                 current_ts = clean_timestamp(step.get('timestamp', 0.0))
                 new_timestamp = st.number_input(f"画像位置(秒) #{i+1}", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}")
                 
+                # Canvasに渡す画像を作成（エラー回避のため軽量化）
                 bg_image = extract_frame_as_pil(temp_filename, new_timestamp)
+                
                 if bg_image:
-                    # ★修正：画像をそのまま渡す！（パッチが裏で仕事をしてくれる）
+                    # ★修正：Component Error対策として、表示用画像は少し小さくする
+                    display_img = bg_image.copy()
+                    display_img.thumbnail((800, 800)) # 最大800pxにリサイズ
+                    
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.1)",
                         stroke_width=stroke_width, stroke_color=stroke_color,
-                        background_image=bg_image, # ここ！PIL画像をそのまま渡します
+                        background_image=display_img, # 軽量化した画像を渡す
                         update_streamlit=True,
-                        height=300, drawing_mode=drawing_mode,
+                        height=300, # 高さは固定（描画の基準にする）
+                        drawing_mode=drawing_mode,
                         key=f"canvas_{i}", display_toolbar=True,
                     )
+                    
                     if canvas_result.image_data is not None:
                         steps[i]['edited_image_data'] = canvas_result.image_data
                 else:
