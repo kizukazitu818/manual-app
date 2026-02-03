@@ -20,16 +20,21 @@ import streamlit_drawable_canvas as canvas_lib
 
 # --- 0. 決定的修正パッチ ---
 # ライブラリの不具合を回避するためのパッチです。
+# これがないと最新のStreamlitでエラーになります。
 def fix_canvas_library():
     def custom_image_to_url(image, width, clamp, channels, output_format, image_id):
-        buffered = BytesIO()
-        image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        return f"data:image/png;base64,{img_str}"
+        try:
+            buffered = BytesIO()
+            image.save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            return f"data:image/png;base64,{img_str}"
+        except Exception:
+            return ""
 
     if hasattr(canvas_lib, 'st_image'):
         canvas_lib.st_image.image_to_url = custom_image_to_url
 
+# アプリ起動時にパッチを適用
 fix_canvas_library()
 
 # --- 1. アプリ全体の基本設定 ---
@@ -78,6 +83,7 @@ def get_available_models(api_key):
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
+                # 無料枠で使えないモデルを除外
                 if "deep-research" in name or "ultra" in name:
                     continue
                 models.append(name)
@@ -195,24 +201,17 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
                 # お絵かきデータを画像化（透明背景）
                 drawing_layer = PILImage.fromarray(step['edited_image_data'].astype('uint8'), 'RGBA')
                 
-                # キャンバスの高さ固定(300px)に合わせて、元画像もリサイズして合わせる
-                # (こうしないと描画位置がズレるため、Excel用に見栄え良く統一します)
-                target_height = 300
-                aspect_ratio = final_img.width / final_img.height
-                target_width = int(target_height * aspect_ratio)
+                # お絵かき層を、元画像のサイズに強制的に合わせる（これでサイズ不一致エラーを回避！）
+                drawing_layer = drawing_layer.resize(final_img.size, PILImage.Resampling.LANCZOS)
                 
-                # 元画像をリサイズ
-                final_img = final_img.resize((target_width, target_height), PILImage.Resampling.LANCZOS)
-                # お絵かき層も同じサイズにリサイズ
-                drawing_layer = drawing_layer.resize((target_width, target_height), PILImage.Resampling.LANCZOS)
-                
-                # 合成！
+                # 元画像の上に、お絵かき層を貼り付け（合成）
                 final_img.paste(drawing_layer, (0, 0), drawing_layer)
                 
             except Exception as e:
+                # 合成に失敗しても、最低限元の画像だけは残す
                 print(f"Image merge error: {e}")
-                # エラーが出ても、元の画像だけは出力するようにする
 
+        # 3. 最終的な画像をExcelに貼り付け
         if final_img:
             try:
                 final_img.thumbnail((320, 240)) # Excelのセルサイズに合わせる
@@ -422,20 +421,21 @@ if uploaded_file is not None:
                 current_ts = clean_timestamp(step.get('timestamp', 0.0))
                 new_timestamp = st.number_input(f"画像位置(秒) #{i+1}", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}")
                 
-                # Canvasに渡す画像を作成（エラー回避のため軽量化）
-                bg_image = extract_frame_as_pil(temp_filename, new_timestamp)
+                # 画像の取得（フルサイズ）
+                bg_image_full = extract_frame_as_pil(temp_filename, new_timestamp)
                 
-                if bg_image:
-                    # ★修正：Component Error対策として、表示用画像は少し小さくする
-                    display_img = bg_image.copy()
-                    display_img.thumbnail((800, 800)) # 最大800pxにリサイズ
-                    
+                if bg_image_full:
+                    # ★Component Error対策：表示用は800px以下にリサイズして渡す
+                    bg_image_display = bg_image_full.copy()
+                    bg_image_display.thumbnail((800, 800))
+
+                    # Canvasに渡す（パッチが効いているのでPIL画像でもOK）
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.1)",
                         stroke_width=stroke_width, stroke_color=stroke_color,
-                        background_image=display_img, # 軽量化した画像を渡す
+                        background_image=bg_image_display, # 軽量版を渡す
                         update_streamlit=True,
-                        height=300, # 高さは固定（描画の基準にする）
+                        height=300, 
                         drawing_mode=drawing_mode,
                         key=f"canvas_{i}", display_toolbar=True,
                     )
@@ -461,4 +461,3 @@ if uploaded_file is not None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary"
         )
-
