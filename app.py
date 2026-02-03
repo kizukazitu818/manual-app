@@ -18,22 +18,24 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from streamlit_drawable_canvas import st_canvas
 import streamlit_drawable_canvas as canvas_lib
 
-# --- 0. 強力な修正パッチ（ここが重要！） ---
-# ライブラリが古い「image_to_url」を探してエラーになるのを防ぐため、
-# 自作の変換関数を強制的に埋め込みます。
+# --- 0. 決定的修正パッチ（ここが最重要！） ---
+# ライブラリの「通信機能」だけを、私たちの手作りコードに差し替えます。
 def fix_canvas_library():
+    # 画像を「データURL」という形式に変換する関数を自作
     def custom_image_to_url(image, width, clamp, channels, output_format, image_id):
-        # 画像をBase64のURL文字列に変換して返す
         buffered = BytesIO()
+        # 画像をPNGとしてメモリに保存
         image.save(buffered, format="PNG")
+        # Base64文字列に変換
         img_str = base64.b64encode(buffered.getvalue()).decode()
+        # データURL形式で返す
         return f"data:image/png;base64,{img_str}"
 
-    # ライブラリ内のモジュールに自作関数を注入
+    # ライブラリの中にある「st_image」という部品の「image_to_url」を、自作関数で上書きする
     if hasattr(canvas_lib, 'st_image'):
         canvas_lib.st_image.image_to_url = custom_image_to_url
 
-# アプリ起動時にパッチを適用
+# アプリ起動時にこのパッチを適用！
 fix_canvas_library()
 
 # --- 1. アプリ全体の基本設定 ---
@@ -319,7 +321,7 @@ with st.sidebar:
             ["🔧 メカニック視点", "🛡️ 安全管理者視点", "📹 解析・記録視点", "🚀 標準"],
             index=3
         )
-        recommended_keyword = "gemini-1.5-flash"
+        recommended_keyword = "gemini-2.5-flash"
         if "メカニック" in scenario: recommended_keyword = "gemini-2.5"
         elif "安全" in scenario: recommended_keyword = "gemini-3"
         elif "解析" in scenario: recommended_keyword = "robotics"
@@ -411,11 +413,11 @@ if uploaded_file is not None:
                 
                 bg_image = extract_frame_as_pil(temp_filename, new_timestamp)
                 if bg_image:
-                    # ★重要：パッチを当てたので、PIL画像をそのまま渡してOKです！
+                    # ★修正：画像をそのまま渡す！（パッチが裏で仕事をしてくれる）
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.1)",
                         stroke_width=stroke_width, stroke_color=stroke_color,
-                        background_image=bg_image, 
+                        background_image=bg_image, # ここ！PIL画像をそのまま渡します
                         update_streamlit=True,
                         height=300, drawing_mode=drawing_mode,
                         key=f"canvas_{i}", display_toolbar=True,
