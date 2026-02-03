@@ -8,42 +8,12 @@ import re
 import numpy as np
 import google.generativeai as genai
 from io import BytesIO
-import base64
 from PIL import Image as PILImage
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, Border, Side
 from openpyxl.drawing.image import Image as ExcelImage
 from gtts import gTTS
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-from streamlit_drawable_canvas import st_canvas
-import streamlit_drawable_canvas as canvas_lib
-
-# --- 0. 決定的修正パッチ（Web表示用） ---
-# ライブラリ内部の古い処理をすべてバイパスして、
-# 強制的にブラウザで表示できる形式（Base64）に変換させます。
-def fix_canvas_library():
-    # 1. ライブラリ内のリサイズ機能を無効化（アプリ側で制御するため）
-    def pass_through_resize(image, height, width):
-        return image
-    canvas_lib._resize_img = pass_through_resize
-
-    # 2. 画像をブラウザ用URLに変換する機能を自作のものに差し替え
-    def custom_image_to_url(image, width, clamp, channels, output_format, image_id):
-        try:
-            # 画像をPNG形式の文字データ(Base64)に変換
-            buffered = BytesIO()
-            image.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            return f"data:image/png;base64,{img_str}"
-        except Exception:
-            return "" # エラー時は空文字を返す
-
-    # ライブラリが参照している場所に、この自作関数を注入
-    if hasattr(canvas_lib, 'st_image'):
-        canvas_lib.st_image.image_to_url = custom_image_to_url
-
-# アプリ起動時にパッチを適用
-fix_canvas_library()
 
 # --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
@@ -77,6 +47,11 @@ st.markdown("""
         border-bottom: 5px solid #FFD700;
         padding-bottom: 10px;
     }
+    
+    /* 編集エリアの枠線デザイン */
+    [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
+        gap: 1rem;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -91,6 +66,7 @@ def get_available_models(api_key):
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
+                # 無料枠で使えないモデルを除外
                 if "deep-research" in name or "ultra" in name:
                     continue
                 models.append(name)
@@ -122,6 +98,7 @@ def clean_timestamp(ts_value):
     return 0.0
 
 def extract_frame_as_pil(video_path, seconds):
+    """指定秒数のフレームをPIL画像として取得（シンプルかつ高速）"""
     cap = cv2.VideoCapture(video_path)
     cap.set(cv2.CAP_PROP_POS_MSEC, seconds * 1000)
     ret, frame = cap.read()
@@ -143,7 +120,7 @@ def generate_audio_bytes(text):
     except Exception:
         return None
 
-# --- 4. Excel作成関数（画像を合成するように修正） ---
+# --- 4. Excel作成関数（シンプル版） ---
 def create_excel_file(steps, m_num, m_author, m_date, video_path):
     wb = Workbook()
     ws = wb.active
@@ -193,22 +170,12 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
         cell_img = ws[f'B{current_row}']
         cell_img.border = thin_border
         
-        # --- 画像合成ロジック ---
+        # タイムスタンプに基づいて画像を切り出す
         final_img = None
-        
         if video_path:
             ts = clean_timestamp(step.get('timestamp', 0))
             if ts >= 0:
                 final_img = extract_frame_as_pil(video_path, ts)
-
-        if final_img and 'edited_image_data' in step and step['edited_image_data'] is not None:
-            try:
-                drawing_layer = PILImage.fromarray(step['edited_image_data'].astype('uint8'), 'RGBA')
-                # お絵かき層を元画像のサイズに合わせる
-                drawing_layer = drawing_layer.resize(final_img.size, PILImage.Resampling.LANCZOS)
-                final_img.paste(drawing_layer, (0, 0), drawing_layer)
-            except Exception as e:
-                print(f"Image merge error: {e}")
 
         if final_img:
             try:
@@ -405,51 +372,44 @@ if uploaded_file is not None:
         steps = st.session_state.manual_steps
         
         st.markdown(f"### ✍️ 手順の編集（使用モデル: {final_model_name}）")
-        st.info("💡 画像の上でドラッグすると、四角形や丸を描き込めます。")
+        st.info("💡 秒数を変更すると、画像がその瞬間のものに自動で切り替わります。")
 
-        tool_cols = st.columns([1, 1, 1, 2])
-        with tool_cols[0]: drawing_mode = st.selectbox("ツール:", ("rect", "circle", "line", "text", "transform"), index=0)
-        with tool_cols[1]: stroke_color = st.color_picker("ペンの色", "#FF0000")
-        with tool_cols[2]: stroke_width = st.slider("線の太さ", 1, 10, 3)
-        
+        # フォームではなく、直接編集することでリアルタイムプレビューを実現
         for i, step in enumerate(steps):
-            st.markdown(f"#### 手順 {i+1}")
-            col_img, col_text = st.columns([1.5, 1])
-            with col_img:
-                current_ts = clean_timestamp(step.get('timestamp', 0.0))
-                new_timestamp = st.number_input(f"画像位置(秒) #{i+1}", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}")
+            # 各手順を枠で囲ってハイライト（視認性アップ）
+            with st.container(border=True):
+                st.markdown(f"#### 手順 {i+1}")
+                col_img, col_text = st.columns([1.5, 1])
                 
-                # 画像の取得（フルサイズ）
-                bg_image_full = extract_frame_as_pil(temp_filename, new_timestamp)
-                
-                if bg_image_full:
-                    # ★Component Error対策：表示用画像は800px以下にリサイズ
-                    bg_image_display = bg_image_full.copy()
-                    bg_image_display.thumbnail((800, 800))
-                    
-                    canvas_result = st_canvas(
-                        fill_color="rgba(255, 165, 0, 0.1)",
-                        stroke_width=stroke_width, stroke_color=stroke_color,
-                        background_image=bg_image_display, # 軽量版を渡す
-                        update_streamlit=True,
-                        height=300, 
-                        drawing_mode=drawing_mode,
-                        key=f"canvas_{i}", display_toolbar=True,
+                with col_img:
+                    current_ts = clean_timestamp(step.get('timestamp', 0.0))
+                    # タイムスタンプ変更（ステップごとにユニークなキーを設定）
+                    new_timestamp = st.number_input(
+                        f"画像位置(秒)", 
+                        min_value=0.0, 
+                        value=current_ts, 
+                        step=0.1, 
+                        format="%.1f", 
+                        key=f"ts_{i}"
                     )
                     
-                    if canvas_result.image_data is not None:
-                        steps[i]['edited_image_data'] = canvas_result.image_data
-                else:
-                    st.warning("画像を取得できませんでした")
-                steps[i]['timestamp'] = new_timestamp
+                    # 動画からその瞬間の画像を切り出して表示（PIL画像をst.imageで直接表示）
+                    display_img = extract_frame_as_pil(temp_filename, new_timestamp)
+                    if display_img:
+                        st.image(display_img, caption=f"{new_timestamp}秒時点のフレーム", use_container_width=True)
+                    else:
+                        st.warning("画像を取得できませんでした")
+                    
+                    # 状態を更新
+                    steps[i]['timestamp'] = new_timestamp
 
-            with col_text:
-                new_title = st.text_input(f"見出し #{i+1}", value=step['title'], key=f"title_{i}")
-                new_text = st.text_area(f"説明 #{i+1}", value=step['text'], key=f"text_{i}", height=200)
-                steps[i]['title'] = new_title
-                steps[i]['text'] = new_text
-            st.divider()
+                with col_text:
+                    new_title = st.text_input(f"見出し", value=step['title'], key=f"title_{i}")
+                    new_text = st.text_area(f"説明", value=step['text'], key=f"text_{i}", height=200)
+                    steps[i]['title'] = new_title
+                    steps[i]['text'] = new_text
 
+        st.divider()
         excel_data = create_excel_file(steps, manual_number, author_name, create_date, temp_filename)
         st.download_button(
             label="📥 編集内容でExcelを作成・ダウンロード",
