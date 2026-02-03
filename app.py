@@ -18,19 +18,27 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from streamlit_drawable_canvas import st_canvas
 import streamlit_drawable_canvas as canvas_lib
 
-# --- 0. 決定的修正パッチ ---
-# ライブラリの不具合を回避するためのパッチです。
-# これがないと最新のStreamlitでエラーになります。
+# --- 0. 決定的修正パッチ（Web表示用） ---
+# ライブラリ内部の古い処理をすべてバイパスして、
+# 強制的にブラウザで表示できる形式（Base64）に変換させます。
 def fix_canvas_library():
+    # 1. ライブラリ内のリサイズ機能を無効化（アプリ側で制御するため）
+    def pass_through_resize(image, height, width):
+        return image
+    canvas_lib._resize_img = pass_through_resize
+
+    # 2. 画像をブラウザ用URLに変換する機能を自作のものに差し替え
     def custom_image_to_url(image, width, clamp, channels, output_format, image_id):
         try:
+            # 画像をPNG形式の文字データ(Base64)に変換
             buffered = BytesIO()
             image.save(buffered, format="PNG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
             return f"data:image/png;base64,{img_str}"
         except Exception:
-            return ""
+            return "" # エラー時は空文字を返す
 
+    # ライブラリが参照している場所に、この自作関数を注入
     if hasattr(canvas_lib, 'st_image'):
         canvas_lib.st_image.image_to_url = custom_image_to_url
 
@@ -83,7 +91,6 @@ def get_available_models(api_key):
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
-                # 無料枠で使えないモデルを除外
                 if "deep-research" in name or "ultra" in name:
                     continue
                 models.append(name)
@@ -186,35 +193,26 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
         cell_img = ws[f'B{current_row}']
         cell_img.border = thin_border
         
-        # --- 画像合成ロジック（修正版） ---
+        # --- 画像合成ロジック ---
         final_img = None
         
-        # 1. まず元の動画フレームを取得（必須）
         if video_path:
             ts = clean_timestamp(step.get('timestamp', 0))
             if ts >= 0:
                 final_img = extract_frame_as_pil(video_path, ts)
 
-        # 2. お絵かきデータがあれば、元の画像の上に重ねる
         if final_img and 'edited_image_data' in step and step['edited_image_data'] is not None:
             try:
-                # お絵かきデータを画像化（透明背景）
                 drawing_layer = PILImage.fromarray(step['edited_image_data'].astype('uint8'), 'RGBA')
-                
-                # お絵かき層を、元画像のサイズに強制的に合わせる（これでサイズ不一致エラーを回避！）
+                # お絵かき層を元画像のサイズに合わせる
                 drawing_layer = drawing_layer.resize(final_img.size, PILImage.Resampling.LANCZOS)
-                
-                # 元画像の上に、お絵かき層を貼り付け（合成）
                 final_img.paste(drawing_layer, (0, 0), drawing_layer)
-                
             except Exception as e:
-                # 合成に失敗しても、最低限元の画像だけは残す
                 print(f"Image merge error: {e}")
 
-        # 3. 最終的な画像をExcelに貼り付け
         if final_img:
             try:
-                final_img.thumbnail((320, 240)) # Excelのセルサイズに合わせる
+                final_img.thumbnail((320, 240))
                 img_byte_arr = BytesIO()
                 final_img.save(img_byte_arr, format='PNG')
                 img_byte_arr.seek(0)
@@ -425,11 +423,10 @@ if uploaded_file is not None:
                 bg_image_full = extract_frame_as_pil(temp_filename, new_timestamp)
                 
                 if bg_image_full:
-                    # ★Component Error対策：表示用は800px以下にリサイズして渡す
+                    # ★Component Error対策：表示用画像は800px以下にリサイズ
                     bg_image_display = bg_image_full.copy()
                     bg_image_display.thumbnail((800, 800))
-
-                    # Canvasに渡す（パッチが効いているのでPIL画像でもOK）
+                    
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.1)",
                         stroke_width=stroke_width, stroke_color=stroke_color,
