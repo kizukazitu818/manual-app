@@ -8,7 +8,7 @@ import re
 import numpy as np
 import google.generativeai as genai
 from io import BytesIO
-import base64 # ★追加：画像変換用
+import base64
 from PIL import Image as PILImage
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, Border, Side
@@ -16,6 +16,30 @@ from openpyxl.drawing.image import Image as ExcelImage
 from gtts import gTTS
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from streamlit_drawable_canvas import st_canvas
+import streamlit_drawable_canvas as canvas_lib
+
+# --- 0. ライブラリの不具合を修正するパッチ（ここが重要！） ---
+def fix_streamlit_canvas_error():
+    """
+    streamlit-drawable-canvasライブラリが最新のStreamlitで
+    エラーを起こす問題を、強制的に修正する関数
+    """
+    # 1. 画像リサイズ関数の修正（文字データを渡してもエラーにならないようにする）
+    original_resize = canvas_lib._resize_img
+    def patched_resize(image, height, width):
+        if isinstance(image, str):
+            return image # 文字データならそのまま返す（何もしない）
+        return original_resize(image, height, width)
+    canvas_lib._resize_img = patched_resize
+
+    # 2. 画像URL変換関数の修正（削除された機能を復活させる）
+    if hasattr(canvas_lib, 'st_image'):
+        def image_to_url(image, width, clamp, channels, output_format, image_id):
+            return image # 文字データならそのまま返す
+        canvas_lib.st_image.image_to_url = image_to_url
+
+# アプリ起動時にパッチを適用
+fix_streamlit_canvas_error()
 
 # --- 1. アプリ全体の基本設定 ---
 st.set_page_config(
@@ -57,30 +81,22 @@ st.markdown("""
 def get_available_models(api_key):
     default_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
     if not api_key: return default_models
-    
     try:
         genai.configure(api_key=api_key)
         models = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
-                # 無料枠で使えないモデルを除外
                 if "deep-research" in name or "ultra" in name:
                     continue
                 models.append(name)
-        
         models.sort()
-        
         prioritized = []
         others = []
         for m in models:
-            if "flash" in m:
-                prioritized.append(m)
-            else:
-                others.append(m)
-        
+            if "flash" in m: prioritized.append(m)
+            else: others.append(m)
         return prioritized + others if (prioritized + others) else default_models
-
     except Exception:
         return default_models
 
@@ -111,7 +127,6 @@ def extract_frame_as_pil(video_path, seconds):
         return PILImage.fromarray(frame)
     return None
 
-# ★追加：画像をBase64文字列に変換する関数（エラー回避用）
 def pil_to_base64(image):
     buffered = BytesIO()
     image.save(buffered, format="PNG")
@@ -403,15 +418,17 @@ if uploaded_file is not None:
             with col_img:
                 current_ts = clean_timestamp(step.get('timestamp', 0.0))
                 new_timestamp = st.number_input(f"画像位置(秒) #{i+1}", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}")
+                
+                # 画像の取得と変換
                 bg_image = extract_frame_as_pil(temp_filename, new_timestamp)
                 if bg_image:
-                    # ★修正：画像をBase64文字列に変換してからキャンバスに渡す
+                    # ここでBase64に変換してからキャンバスに渡す（エラー回避）
                     bg_base64 = pil_to_base64(bg_image)
                     
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.1)",
                         stroke_width=stroke_width, stroke_color=stroke_color,
-                        background_image=bg_base64, # ここを変更！
+                        background_image=bg_base64, # Base64文字列を渡す
                         update_streamlit=True,
                         height=300, drawing_mode=drawing_mode,
                         key=f"canvas_{i}", display_toolbar=True,
