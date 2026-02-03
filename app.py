@@ -19,16 +19,17 @@ from streamlit_drawable_canvas import st_canvas
 import streamlit_drawable_canvas as canvas_lib
 
 # --- 0. 決定的修正パッチ（ここが最重要！） ---
-# ライブラリの「通信機能」だけを、私たちの手作りコードに差し替えます。
+# ライブラリが古い機能を使おうとしてエラーになるのを防ぐため、
+# 画像変換機能だけを、私たちの手作りコードにこっそり差し替えます。
 def fix_canvas_library():
-    # 画像を「データURL」という形式に変換する関数を自作
+    # 画像を「データURL（文字の羅列）」に変換する関数を自作
     def custom_image_to_url(image, width, clamp, channels, output_format, image_id):
         buffered = BytesIO()
-        # 画像をPNGとしてメモリに保存
+        # 画像をPNG形式でメモリに保存
         image.save(buffered, format="PNG")
         # Base64文字列に変換
         img_str = base64.b64encode(buffered.getvalue()).decode()
-        # データURL形式で返す
+        # データURL形式で返す（これでブラウザが画像として認識できる）
         return f"data:image/png;base64,{img_str}"
 
     # ライブラリの中にある「st_image」という部品の「image_to_url」を、自作関数で上書きする
