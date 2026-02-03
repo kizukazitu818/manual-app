@@ -8,13 +8,13 @@ import re
 import numpy as np
 import google.generativeai as genai
 from io import BytesIO
+import base64 # ★追加：画像変換用
 from PIL import Image as PILImage
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, Border, Side
 from openpyxl.drawing.image import Image as ExcelImage
 from gtts import gTTS
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-# お絵かき機能
 from streamlit_drawable_canvas import st_canvas
 
 # --- 1. アプリ全体の基本設定 ---
@@ -55,17 +55,32 @@ st.markdown("""
 # --- 2. モデルリスト取得関数 ---
 @st.cache_data(ttl=600)
 def get_available_models(api_key):
-    default_models = ["gemini-2.5-flash"]
+    default_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"]
     if not api_key: return default_models
+    
     try:
         genai.configure(api_key=api_key)
         models = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
+                # 無料枠で使えないモデルを除外
+                if "deep-research" in name or "ultra" in name:
+                    continue
                 models.append(name)
+        
         models.sort()
-        return models if models else default_models
+        
+        prioritized = []
+        others = []
+        for m in models:
+            if "flash" in m:
+                prioritized.append(m)
+            else:
+                others.append(m)
+        
+        return prioritized + others if (prioritized + others) else default_models
+
     except Exception:
         return default_models
 
@@ -95,6 +110,13 @@ def extract_frame_as_pil(video_path, seconds):
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return PILImage.fromarray(frame)
     return None
+
+# ★追加：画像をBase64文字列に変換する関数（エラー回避用）
+def pil_to_base64(image):
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
 
 @st.cache_data
 def generate_audio_bytes(text):
@@ -242,7 +264,10 @@ def process_video_with_gemini(video_path, api_key, selected_model):
         progress_bar.empty()
         return json.loads(response.text)
     except Exception as e:
-        st.error(f"エラーが発生しました: {e}")
+        if "429" in str(e):
+            st.error(f"⚠️ API制限エラー: '{selected_model}' は利用不可または制限超過です。'gemini-1.5-flash' を選んでください。")
+        else:
+            st.error(f"エラーが発生しました: {e}")
         return []
 
 # --- 6. サーバー掃除機能 ---
@@ -289,16 +314,25 @@ with st.sidebar:
             ["🔧 メカニック視点", "🛡️ 安全管理者視点", "📹 解析・記録視点", "🚀 標準"],
             index=3
         )
-        recommended_keyword = "gemini-1.5-flash"
+        recommended_keyword = "gemini-2.5-flash"
         if "メカニック" in scenario: recommended_keyword = "gemini-2.5"
         elif "安全" in scenario: recommended_keyword = "gemini-3"
         elif "解析" in scenario: recommended_keyword = "robotics"
         
         default_index = 0
+        found = False
         for i, m in enumerate(available_models):
             if recommended_keyword in m:
                 default_index = i
+                found = True
                 break
+        if not found:
+            for i, m in enumerate(available_models):
+                if "gemini-1.5-flash" in m:
+                    default_index = i
+                    found = True
+                    break
+        
         final_model_name = st.selectbox("使用モデル", available_models, index=default_index)
         
         st.divider()
@@ -323,13 +357,10 @@ uploaded_file = st.file_uploader("動画アップロード", type=["mp4", "mov"]
 
 if uploaded_file is not None:
     temp_filename = "temp_video.mp4"
-    # ★修正ポイント：メモリ節約モード（チャンク書き込み）★
-    # これで大きな動画でもクラッシュしません
     with open(temp_filename, "wb") as f:
         while True:
-            chunk = uploaded_file.read(1024 * 1024) # 1MBずつ読み込む
-            if not chunk:
-                break
+            chunk = uploaded_file.read(1024 * 1024)
+            if not chunk: break
             f.write(chunk)
 
     with st.expander("⚙️ 表示サイズ調整"):
@@ -374,10 +405,14 @@ if uploaded_file is not None:
                 new_timestamp = st.number_input(f"画像位置(秒) #{i+1}", min_value=0.0, value=current_ts, step=0.1, format="%.1f", key=f"ts_{i}")
                 bg_image = extract_frame_as_pil(temp_filename, new_timestamp)
                 if bg_image:
+                    # ★修正：画像をBase64文字列に変換してからキャンバスに渡す
+                    bg_base64 = pil_to_base64(bg_image)
+                    
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.1)",
                         stroke_width=stroke_width, stroke_color=stroke_color,
-                        background_image=bg_image, update_streamlit=True,
+                        background_image=bg_base64, # ここを変更！
+                        update_streamlit=True,
                         height=300, drawing_mode=drawing_mode,
                         key=f"canvas_{i}", display_toolbar=True,
                     )
