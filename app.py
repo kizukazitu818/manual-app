@@ -214,7 +214,7 @@ def clear_api_storage(api_key):
 with st.sidebar:
     # ★修正：ロゴ画像の表示（nano_banana.pngを使用）
     try:
-        st.image("nano_banana.png", use_container_width=True)
+        st.image("logo.png", use_container_width=True)
     except:
         # 万が一画像がない場合のフォールバック
         st.header("🍌 Nano Banana")
@@ -365,3 +365,4 @@ if uploaded_file:
         with c2:
             excel_data = create_excel_file(steps, manual_number, author_name, create_date, temp_filename)
             st.download_button("📥 編集完了！Excelをダウンロード", excel_data, f"{manual_number}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
+
