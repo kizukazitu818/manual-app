@@ -18,9 +18,8 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from streamlit_drawable_canvas import st_canvas
 import streamlit_drawable_canvas as canvas_lib
 
-# --- 0. 修正パッチ（お絵かき機能用） ---
+# --- 0. 必須パッチ（Streamlitの仕様変更対応） ---
 def fix_canvas_library():
-    # 画像をブラウザ用データに変換する関数を自作
     def custom_image_to_url(image, width, clamp, channels, output_format, image_id):
         try:
             buffered = BytesIO()
@@ -29,8 +28,7 @@ def fix_canvas_library():
             return f"data:image/png;base64,{img_str}"
         except Exception:
             return ""
-    
-    # ライブラリに注入
+
     if hasattr(canvas_lib, 'st_image'):
         canvas_lib.st_image.image_to_url = custom_image_to_url
 
@@ -46,7 +44,6 @@ st.markdown("""
     [data-testid="stFileUploaderDropzone"] { background-color: #E6F3FF; border: 2px dashed #007BFF; border-radius: 15px; padding: 20px; }
     [data-testid="stSidebar"] { background-color: #E6F3FF; }
     h1 { border-bottom: 5px solid #FFD700; padding-bottom: 10px; }
-    .step-card { border: 1px solid #ddd; padding: 15px; border-radius: 10px; margin-bottom: 10px; background-color: #f9f9f9; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -103,7 +100,7 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
     wb = Workbook()
     ws = wb.active
     ws.title = "作業手順書"
-    # (フォント設定等は省略せず記述)
+    
     header_font = Font(bold=True, size=16)
     meta_font = Font(size=11)
     title_font = Font(bold=True, size=12)
@@ -132,7 +129,7 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
         ws[f'A{current_row}'].border = thin_border
         ws[f'B{current_row}'].border = thin_border
         
-        # --- 画像合成 ---
+        # --- 画像合成処理 ---
         final_img = None
         if video_path:
             ts = clean_timestamp(step.get('timestamp', 0))
@@ -141,10 +138,14 @@ def create_excel_file(steps, m_num, m_author, m_date, video_path):
 
         if final_img and 'edited_image_data' in step and step['edited_image_data'] is not None:
             try:
+                # お絵かきデータを画像化
                 drawing_layer = PILImage.fromarray(step['edited_image_data'].astype('uint8'), 'RGBA')
+                # お絵かき層を元画像のサイズに引き伸ばして合わせる
                 drawing_layer = drawing_layer.resize(final_img.size, PILImage.Resampling.LANCZOS)
+                # 合成
                 final_img.paste(drawing_layer, (0, 0), drawing_layer)
-            except: pass
+            except Exception as e:
+                print(f"Merge error: {e}")
 
         if final_img:
             try:
@@ -192,7 +193,8 @@ def process_video_with_gemini(video_path, api_key, selected_model):
         progress_bar.progress(100, text="完了！"); time.sleep(1); progress_bar.empty()
         return json.loads(response.text)
     except Exception as e:
-        st.error(f"エラー: {e}")
+        if "429" in str(e): st.error("⚠️ API制限です。モデルを変更するか時間を空けてください。")
+        else: st.error(f"エラー: {e}")
         return []
 
 # --- 6. サーバー掃除 ---
@@ -208,16 +210,21 @@ def clear_api_storage(api_key):
         st.sidebar.success(f"🧹 {len(files)}個削除完了")
     except: st.sidebar.error("削除失敗")
 
-# --- 7. UI ---
+# --- 7. サイドバー設定 ---
 with st.sidebar:
-    st.header("🍌 Nano Banana")
+    # ★修正：ロゴ画像の表示（nano_banana.pngを使用）
+    try:
+        st.image("nano_banana.png", use_container_width=True)
+    except:
+        # 万が一画像がない場合のフォールバック
+        st.header("🍌 Nano Banana")
+
     st.markdown("### Manufacturing AI Tools")
     st.divider()
     api_key = st.text_input("Google API Key", type="password")
     
     if api_key:
         available_models = get_available_models(api_key)
-        # (モデル選択ロジックは簡略化して記述)
         final_model_name = st.selectbox("使用モデル", available_models, index=0)
         with st.expander("🛠️ メンテナンス"):
             if st.button("🗑️ ゴミ箱を空にする"): clear_api_storage(api_key)
@@ -232,20 +239,29 @@ with st.sidebar:
 st.title("📜 Nano Factory AI")
 st.markdown("<p style='font-size: 1.3rem; font-weight: bold; color: #555;'>動画からマニュアルを自動生成・編集・Excel出力まで一気通貫で行います。</p>", unsafe_allow_html=True)
 
-if "edit_mode" not in st.session_state: st.session_state.edit_mode = "list" # list or draw
+# セッション状態の初期化
+if "edit_mode" not in st.session_state: st.session_state.edit_mode = "list"
 if "manual_steps" not in st.session_state: st.session_state.manual_steps = None
+if "last_uploaded_file" not in st.session_state: st.session_state.last_uploaded_file = None
 
 uploaded_file = st.file_uploader("動画アップロード", type=["mp4", "mov"], label_visibility="collapsed")
 
 if uploaded_file:
-    temp_filename = "temp_video.mp4"
-    if not os.path.exists(temp_filename): # 再アップロード回避
+    # 動画切り替え時のリセット処理
+    if st.session_state.last_uploaded_file != uploaded_file.name:
+        st.session_state.manual_steps = None
+        st.session_state.edit_mode = "list"
+        st.session_state.last_uploaded_file = uploaded_file.name
+        temp_filename = "temp_video.mp4"
         with open(temp_filename, "wb") as f:
             while True:
                 chunk = uploaded_file.read(1024*1024)
                 if not chunk: break
                 f.write(chunk)
+    else:
+        temp_filename = "temp_video.mp4"
 
+    # --- 画面表示 ---
     if st.session_state.edit_mode == "list":
         # === モード1：リスト表示 & 秒数調整 ===
         st.subheader("🎥 現場動画（元データ）")
@@ -273,6 +289,7 @@ if uploaded_file:
                     with c1:
                         ts = clean_timestamp(step.get('timestamp', 0))
                         new_ts = st.number_input(f"秒数 #{i+1}", value=ts, step=0.1, format="%.1f", key=f"ts_{i}")
+                        # 高速表示用画像
                         img = extract_frame_as_pil(temp_filename, new_ts)
                         if img: st.image(img, use_container_width=True)
                         steps[i]['timestamp'] = new_ts
@@ -299,7 +316,7 @@ if uploaded_file:
         
         steps = st.session_state.manual_steps
         
-        # 編集する手順を選ぶセレクトボックス
+        # 編集する手順を選ぶ
         step_options = [f"手順 {i+1}: {s['title']}" for i, s in enumerate(steps)]
         selected_option = st.selectbox("編集する画像を選択:", step_options)
         selected_index = step_options.index(selected_option)
@@ -310,13 +327,13 @@ if uploaded_file:
         with t2: color = st.color_picker("色", "#FF0000", key="draw_color")
         with t3: width = st.slider("太さ", 1, 10, 3, key="draw_width")
 
-        # キャンバス表示（1つだけ表示するので軽快！）
+        # キャンバス表示
         target_step = steps[selected_index]
         ts = clean_timestamp(target_step.get('timestamp', 0))
         bg_img = extract_frame_as_pil(temp_filename, ts)
         
         if bg_img:
-            # 高画質すぎると重いのでリサイズして表示（保存時は合成で綺麗にする）
+            # 表示用画像を軽量化（最大800px）
             display_img = bg_img.copy()
             display_img.thumbnail((800, 800))
             
@@ -328,17 +345,16 @@ if uploaded_file:
                 stroke_width=width, stroke_color=color,
                 background_image=display_img,
                 update_streamlit=True,
-                height=400, # 大きく表示
+                height=400,
                 drawing_mode=mode,
-                initial_drawing=None, # 再編集は難しいので簡易実装
-                key=f"canvas_editor_{selected_index}", # キーを変えてリセット防止
+                initial_drawing=initial_data if initial_data else None,
+                key=f"canvas_editor_{selected_index}",
                 display_toolbar=True,
             )
             
             # 描画データを保存
             if canvas_result.image_data is not None:
                 steps[selected_index]['edited_image_data'] = canvas_result.image_data
-                st.success("✅ 編集内容を一時保存中...")
 
         st.divider()
         c1, c2 = st.columns(2)
